@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelUsage, Register } from 'claude-code'
 
 import type { AgentRow, MainState, PanelState } from '../types'
-import { DESIGNS, agentSprite, barSprite, mainSprite } from './sprites'
+import { DESIGNS, agentSprite, bandBar, barSprite, mainSprite, plainSprite } from './sprites'
 
 const PANE = 'progress-bar'
 const TITLE = 'Agents'
@@ -102,7 +102,9 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
       const at = await $.clock.now()
-      await update($, main, m => ({ ...m, isWorking: true, turnStartedAt: at }))
+      // A continuation has no typed text: it keeps the title of the prompt it continues.
+      const title = e.text.trim().split('\n')[0]?.slice(0, 80)
+      await update($, main, m => ({ ...m, isWorking: true, turnStartedAt: at, title: title || m.title }))
       await update($, now, () => at)
     }
     return next(e)
@@ -301,7 +303,7 @@ export const register: Register = on => {
               key={`main-${m.isWorking ? 'work' : 'idle'}`}
               source={mainSprite(m.isWorking)}
               alt={m.isWorking ? 'Main crab typing on its laptop' : 'Main crab dozing'}
-              width={102}
+              width={104}
               height={48}
               isInteractive
             />
@@ -342,49 +344,71 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const [list, m, tick] = await Promise.all([read($, agents), read($, main), read($, now)])
+    // No read of `now` here: the band redraws only when work changes, so its shine runs unbroken.
+    const [list, m, p] = await Promise.all([read($, agents), read($, main), read($, panel)])
     const running = list.filter(a => a.status === 'running')
-    const isWorking = e.props.isWorking || m.isWorking
-    if (e.props.hasSurvey || (!isWorking && running.length === 0)) return next(e)
+    const turn = list.filter(a => a.startedAt >= m.turnStartedAt)
+    const isWorking = e.props.isWorking || m.isWorking || running.length > 0
+    // Once the turn ends, a turn that had subagents stays up as Done until the next one starts.
+    const isDone = !isWorking && turn.length > 0
+    if (e.props.hasSurvey || (!isWorking && !isDone) || p.hiddenTurn === m.turnStartedAt) return next(e)
 
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
     const Svg = 'Svg' in ui ? ui.Svg : undefined
-    const at = Math.max(tick, m.turnStartedAt)
 
-    // This turn's subagents: the bar fills as they finish.
-    const turn = list.filter(a => a.startedAt >= m.turnStartedAt)
+    // The bar fills as this turn's subagents finish.
     const done = turn.filter(a => a.status !== 'running').length
-    const fraction = turn.length > 0 ? done / turn.length : 0
-    const cost = m.costUsd + list.reduce((s, a) => s + a.costUsd, 0)
-    const label = running.length > 0 ? `${running.length} subagent${running.length > 1 ? 's' : ''} working` : 'Working'
-    const barW = Math.max(60, Math.min(260, (e.props.bodyColumns || 80) * 8 - 520))
+    const fraction = isDone ? 1 : turn.length > 0 ? done / turn.length : 0
+    const label = isDone ? 'Done' : turn.length > 0 ? `Agents ${done}/${turn.length}` : 'Working'
+    const title = m.title || 'Working'
+    const total = (e.props.bodyColumns || 100) * 8
+    const titleW = Math.min(title.length * 7.5 + 30, 300)
+    const barW = Math.round(Math.max(120, Math.min(640, total - titleW - 170)))
+    const accent = isDone ? '#5BBF8A' : '#8B7CF6'
 
     return (
       <Box flexDirection="row" gap={1} alignItems="center">
-        {Svg && (
+        <Text color={accent}>●</Text>
+        <Box flexShrink={1}>
+          <Text weight="semibold" wrap="truncate-end">
+            {title}
+          </Text>
+        </Box>
+        {Svg ? (
           <Svg
-            key="band-crab"
-            source={mainSprite(true)}
-            alt="Main crab typing"
-            width={51}
-            height={24}
-            isInteractive
+            key={`band-bar-${isDone ? 'done' : 'work'}`}
+            source={bandBar(barW, fraction, label, isDone, turn.length)}
+            alt={isDone ? 'Done' : `${label}, ${Math.round(fraction * 100)}%`}
+            width={barW}
+            height={20}
+            isInteractive={!isDone || undefined}
           />
-        )}
-        <Text weight="semibold">{label}</Text>
-        {turn.length > 0 && Svg && (
-          <Svg key="band-bar" source={barSprite(barW, fraction)} alt={`${done} of ${turn.length} done`} width={barW} height={6} />
+        ) : (
+          <Text color={accent}>{label}</Text>
         )}
         {turn.length > 0 && (
           <Text dimColor tabular>
-            {done}/{turn.length} · {Math.round(fraction * 100)}%
+            {Math.round(fraction * 100)}%
           </Text>
         )}
-        <Text dimColor tabular>
-          {fmtTime(m.isWorking ? at - m.turnStartedAt : 0)} · {fmtCost(cost)}
-        </Text>
-        <Button key="open-agents" plain label={`Agents ×${list.length}`} onPress={() => void openPane($)} />
+        {Svg && (
+          <Svg
+            key={`band-crab-${isDone ? 'done' : 'work'}`}
+            source={plainSprite(isDone ? 'done' : 'working')}
+            alt={isDone ? 'Crab resting' : 'Crab working'}
+            width={28}
+            height={20}
+            isInteractive
+          />
+        )}
+        <Button key="open-agents" plain label={`×${list.length}`} onPress={() => void openPane($)} />
+        <Button
+          key="hide-band"
+          plain
+          label="✕"
+          onPress={() => update($, panel, prev => ({ ...prev, hiddenTurn: m.turnStartedAt }))}
+        />
       </Box>
     )
   })

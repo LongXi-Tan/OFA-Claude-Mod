@@ -33,9 +33,15 @@ export type MainState = {
   costUsd: number
   model: string
   effort?: string
+  /** The first line of the prompt that started the turn, the band's title. */
+  title?: string
 }
 
-export type PanelState = { isDoneCollapsed: boolean }
+export type PanelState = {
+  isDoneCollapsed: boolean
+  /** The `turnStartedAt` of the turn whose band the person closed. */
+  hiddenTurn?: number
+}
 
 declare module 'claude-code' {
   interface PluginState {
