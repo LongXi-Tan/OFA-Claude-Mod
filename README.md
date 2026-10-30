@@ -1,45 +1,53 @@
 # OFA-Claude-Mod
 
-Personal Use Claude Code mods.
+My mods for [Claude Code](https://claude.com/claude-code). Each one is a standalone plugin under `plugins/`.
 
-## progress-bar
+| Mod | What it does |
+| --- | --- |
+| [progress-bar](plugins/progress-bar) | A progress bar above the prompt that fills as Claude's tasks and subagents finish, and an Agents pane of animated pixel crabs with cost, tokens and time. |
 
-A standalone mod that shows what Claude and its native subagents are doing, with no skill or slash command needed to start it.
+## Install
 
-- **Band above the prompt**: a short title for the work, a bar of shimmering pixel dots with a pill (`2/6`) that slides forward as each task is done, the trail filling in behind it as it passes, then the percent and a hopping crab. The tasks are Claude's own task list when the run has one (the list the desktop app pins under Claude's message, or the terminal's todos), and its subagents when it has none. Click the crab and it plays Claude Desktop's own laptop scene beside the percent, which stays in view, recreated frame by frame from a screen recording: it pulls a laptop down from above, types on it, then folds it away. `×N` opens the Agents pane, or closes it when it is open. `▼` folds the band down to a lone `▲` in the same spot that brings it back; it stays folded from run to run until you open it. When the run ends the band turns green and says **Done**, still shimmering, and stays that way until your next message.
-- **Agents pane**, which opens by itself when subagents start, or with `/progress-bar`: session cost, tokens and work time at the top; the main session's crab, which pulls out a laptop and types while working, folds the laptop away as the turn ends, then dozes; then every subagent as its own animated pixel crab (Wizard, Pirate, Ninja, Knight, Musician, Painter) with its model, effort and `bg` when it runs in the background, its context fill, tokens, cost and time. Finished agents rest with happy eyes, failed ones turn grey with crossed eyes, and stopped ones turn grey with ■. An agent woken again shows `round 2`.
+**Claude desktop app**
 
-### Runs and titles
+1. Click **+** next to the prompt box, then **Plugins**.
+2. Choose **Add marketplace** and enter `LongXi-Tan/OFA-Claude-Mod`.
+3. Choose **Add plugin**, then **progress-bar**.
 
-A run begins with your own message when nothing is working, and a message sent mid-run joins it. Notifications from background agents, scheduled prompts and slash commands never start one. The run's title names the work rather than repeating your words: one quick Haiku call (a fraction of a cent) writes 2 to 6 words, and a follow-up like "yes, commit it" keeps the title it continues. If the call fails, or titles are turned off, the first line of your message stands in.
+**Claude Code in a terminal**
 
-### Commands
-
-- `/progress-bar` opens the Agents pane.
-- `/progress-bar demo` plays a free demo: six fake subagents over about 20 seconds, with no model calls.
-- `/progress-bar clear` removes the demo, its agents and its band, and stops a demo still playing.
-
-### Options
-
-Both are on by default; change them in the config menu, or under `pluginConfigs` in settings.
-
-- `autoOpenPane`: open the Agents pane when subagents start working.
-- `workTitles`: name each new piece of work with Haiku; off shows your message's first line.
-
-### Cost
-
-Cost is an estimate at API list prices (cache writes counted at 1.25x input). On a subscription plan it is what the work would cost on the API, not what you are billed.
-
-### Develop and test
-
-The folder type-checks with its own `tsconfig.json` once Claude Code has loaded the mod and laid its types in `.claude-plugin/types/`. The tests play the demo on a fake clock and cover runs, titles, task lists, rounds, stopped agents, `/clear`, the band's buttons, the bar's steps (each opens on the bar as it stood, ends on the bar as it stands, and plays once), and the crab's walk (every leg attached and whole in every frame):
-
-```bash
-claude plugin test progress-bar
+```
+/plugin install progress-bar --marketplace LongXi-Tan/OFA-Claude-Mod
 ```
 
-To load the mod in every session, name the mod folder in `CLAUDE_CODE_PLUGIN_DIRS` (in `~/.claude/settings.json` under `env`), or start a terminal session with `claude --plugin-dir ./progress-bar`.
+Answer `y` to add the marketplace, then press Enter to install it for your user. The mod starts working right away, including in the desktop app's Code tab.
 
-### Attribution
+## Use
 
-shoutout to JohnnyVizz on the claude-kit (savvy-progress) plug in, big fan of the that plug in he made, and decided to build one mod like this progress bar myself.
+Give Claude some work, and the bar appears above the prompt. Run `/progress-bar demo` to see it in action for free. Everything the mod does is in its [README](plugins/progress-bar).
+
+Mods run on Claude Code's function hooks, an early-access API. This one is tested on Claude Code 2.1.309.
+
+## Develop
+
+```bash
+claude --plugin-dir plugins/progress-bar
+```
+
+```bash
+claude plugin test plugins/progress-bar
+```
+
+```bash
+claude plugin validate .
+```
+
+The first loads the mod from this folder for one session, the second runs its tests, and the third checks the marketplace.
+
+## Attribution
+
+shoutout to JohnnyVizz on the [claude-kit](https://github.com/JohnnyVizz/claude-kit) (savvy-progress) plug in, big fan of the that plug in he made, and decided to build one mod like this progress bar myself.
+
+## License
+
+[MIT](LICENSE)

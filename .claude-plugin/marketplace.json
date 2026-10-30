@@ -1,0 +1,14 @@
+{
+  "name": "ofa-claude-mod",
+  "owner": { "name": "LongXi-Tan", "url": "https://github.com/LongXi-Tan" },
+  "metadata": { "description": "LongXi-Tan's Claude Code mods." },
+  "plugins": [
+    {
+      "name": "progress-bar",
+      "source": "./plugins/progress-bar",
+      "description": "Mod: a progress bar above the prompt that fills as Claude's tasks and subagents finish, and an Agents pane of animated pixel crabs with cost, tokens and time.",
+      "version": "0.3.0",
+      "category": "mod"
+    }
+  ]
+}

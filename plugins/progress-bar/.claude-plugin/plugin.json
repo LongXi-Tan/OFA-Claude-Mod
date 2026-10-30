@@ -1,7 +1,7 @@
 {
   "name": "progress-bar",
-  "version": "0.2.0",
-  "description": "A progress band above the prompt and an Agents pane where every native subagent works as an animated pixel crab, with cost, tokens and time",
+  "version": "0.3.0",
+  "description": "A progress bar above the prompt that fills as Claude's tasks and subagents finish, and an Agents pane where every subagent works as an animated pixel crab, with cost, tokens and time",
   "author": { "name": "LongXi-Tan" },
   "license": "MIT",
   "types": "./types/index.d.ts",
