@@ -147,3 +147,8 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# Claude mods: engine-generated types (keep each mod's own types/index.d.ts)
+.claude-plugin/types/
+**/.claude-plugin/types/
+.claude/settings.local.json
