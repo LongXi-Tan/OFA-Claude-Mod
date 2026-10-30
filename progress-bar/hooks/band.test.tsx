@@ -76,13 +76,17 @@ test('the band draws the pill one size in every state, and dots across the full 
   const done = await drawn()
 
   // The pill: 52 wide and 20 tall in both states, the Done pill's size; no slanted glint.
-  const pill = (fill: string) => new RegExp(`<rect( class="breathe")? x="\\d+" y="0" width="52" height="20" rx="10" fill="${fill}"/>`)
-  expect(working).toMatch(pill('#8B7CF6'))
-  expect(done).toMatch(pill('#5BBF8A'))
+  const pill = (cls: string, fill: string) =>
+    new RegExp(`<rect class="${cls}" x="\\d+" y="0" width="52" height="20" rx="10" fill="${fill}"/>`)
+  expect(working).toMatch(pill('breathe', '#8B7CF6'))
+  expect(done).toMatch(pill('breathe-done', '#5BBF8A'))
   expect(working).not.toMatch(/glint|polygon/)
   // Dots from the bar's top row to its bottom one.
   for (const source of [working, done]) {
     expect(source).toMatch(/M\d+ 0h2v2h-2z/)
     expect(source).toMatch(/M\d+ 18h2v2h-2z/)
   }
+  // Done, the bar still moves: its dots shimmer, slower, and a few still twinkle.
+  expect(done).toMatch(/<path class="wd j\d+" fill="#[0-9A-F]{6}"/)
+  expect(done).toMatch(/<path class="sp s\d spd" d="/)
 })

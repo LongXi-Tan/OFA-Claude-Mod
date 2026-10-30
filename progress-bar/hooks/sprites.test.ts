@@ -1,12 +1,13 @@
 import { expect, test } from 'claude-code/testing'
 
-import { DESIGNS, agentSprite, bandRow } from './sprites'
+import { SCENE_POSES, SCENE_SEQUENCE } from './scene'
+import { DESIGNS, SCENE_S, agentSprite, bandRow } from './sprites'
 import type { CrabMood } from './sprites'
 
 // The sprites are SVG strings, so these tests read the drawing itself: every rect, the
 // groups around it and their classes, and the CSS and SVG timing that move them.
 
-type Rect = { x: number; y: number; w: number; h: number; groups: string[] }
+type Rect = { x: number; y: number; w: number; h: number; fill: string; groups: string[] }
 
 const RESTING: CrabMood[] = ['done', 'failed', 'stopped']
 const BAND = { width: 640, title: 'Polish the progress bar', done: 1, total: 3 }
@@ -20,7 +21,8 @@ function rects(svg: string): Rect[] {
     else if (tag.startsWith('<g')) groups.push(/\bclass="([^"]*)"/.exec(tag)?.[1] ?? '')
     else {
       const [, x, y, w, h] = /\sx="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)" height="([\d.]+)"/.exec(tag) ?? []
-      found.push({ x: Number(x), y: Number(y), w: Number(w), h: Number(h), groups: [...groups] })
+      const fill = /\sfill="([^"]+)"/.exec(tag)?.[1] ?? ''
+      found.push({ x: Number(x), y: Number(y), w: Number(w), h: Number(h), fill, groups: [...groups] })
     }
   }
   return found
@@ -146,39 +148,100 @@ test('a hop never lifts a hat or a sword out of the drawing', async () => {
   expect(peak >= 0, `band: highest point mid-hop ${peak}`).toBe(true)
 })
 
-test('a click on the band crab plays the laptop scene in its place, then gives it back', async () => {
+
+/** The scene's poses as the band draws them: each one's timing and its pixels, by colour. */
+function posesIn(box: string) {
+  return [
+    ...box.matchAll(
+      /<g class="pose" visibility="hidden"><animate attributeName="visibility" calcMode="discrete" values="([^"]+)" keyTimes="([^"]+)" begin="crab\.click" dur="([^"]+)"\/>(.*?)<\/g>/g,
+    ),
+  ].map(([, values = '', keyTimes = '', dur = '', paths = '']) => {
+    const pixels = new Map<string, Set<string>>()
+    for (const [, fill = '', d = ''] of paths.matchAll(/<path fill="([^"]+)" d="([^"]+)"\/>/g)) {
+      const set = pixels.get(fill) ?? new Set<string>()
+      for (const [, x, y, w] of d.matchAll(/M(-?\d+) (-?\d+)h(\d+)v1h-\d+z/g)) {
+        for (let i = 0; i < Number(w); i++) set.add(`${Number(x) + i},${y}`)
+      }
+      pixels.set(fill, set)
+    }
+    return { values: values.split(';'), keyTimes: keyTimes.split(';').map(Number), dur, pixels }
+  })
+}
+
+/** The rects' pixels by colour. */
+function pixelsOf(rs: Rect[]) {
+  const pixels = new Map<string, Set<string>>()
+  for (const r of rs) {
+    const set = pixels.get(r.fill) ?? new Set<string>()
+    for (let x = r.x; x < r.x + r.w; x++) for (let y = r.y; y < r.y + r.h; y++) set.add(`${x},${y}`)
+    pixels.set(r.fill, set)
+  }
+  return pixels
+}
+
+test('a click on the band crab plays the recorded scene in its place, then gives it back', async () => {
   for (const isDone of [false, true]) {
     const svg = bandRow({ ...BAND, isDone })
     const who = isDone ? 'done' : 'working'
     // The click lands on a clear rect over the crab, drawn last so it is on top.
     expect(svg, `${who}: the click target`).toMatch(
-      /<rect id="crab" x="\d+" y="0" width="24" height="20" fill="#000000" fill-opacity="0" pointer-events="all"[^>]*>(<title>[^<]*<\/title>)?<\/rect><\/svg><\/svg>$/,
+      /<rect id="crab" x="\d+" y="0" width="24" height="\d+" fill="#000000" fill-opacity="0" pointer-events="all"[^>]*>(<title>[^<]*<\/title>)?<\/rect><\/svg><\/svg>$/,
     )
-    // Every part of the scene starts on that click and lasts as long.
+    // Every timed part starts on that click and lasts the recording's length: the crab
+    // stepping out, the percent stepping aside, and each pose.
     const timings = [...svg.matchAll(/begin="([^"]+)" dur="([^"]+)"/g)].map(m => `${m[1]} ${m[2]}`)
-    expect(timings.length, `${who}: timed parts`).toBe(4)
-    expect([...new Set(timings)], `${who}: their timing`).toEqual(['crab.click 4s'])
-    // The crab steps out, the scene steps in, the percent steps aside.
-    expect(svg).toMatch(/<g class="(walk|still)"><set attributeName="opacity" to="0" begin="crab.click"/)
-    expect(svg).toMatch(/<g class="scene" opacity="0"><set attributeName="opacity" to="1" begin="crab.click"/)
+    expect(timings, `${who}: timed parts`).toHaveLength(2 + SCENE_POSES.length)
+    expect([...new Set(timings)], `${who}: their timing`).toEqual([`crab.click ${SCENE_S.toFixed(3)}s`])
+    expect(svg).toMatch(/<g class="(walk|still)"><set attributeName="visibility" to="hidden" begin="crab\.click"/)
     expect(svg).toMatch(/%<animate attributeName="opacity" values="1;0;0;1" keyTimes="0;\.06;\.94;1" begin="crab\.click"/)
+  }
+  expect(SCENE_S.toFixed(3), 'the scene lasts as long as the recording').toBe((95 / 30).toFixed(3))
+})
+
+test('every moment of the scene shows exactly one pose, in the recording\'s order', async () => {
+  const poses = posesIn(crabBox(bandRow({ ...BAND, isDone: false })))
+  expect(poses).toHaveLength(SCENE_POSES.length)
+  const total = SCENE_SEQUENCE.reduce((sum, [, n]) => sum + n, 0)
+  // Discrete timing: a pose shows the value of the last key time at or before the moment.
+  const shown = (p: (typeof poses)[number], t: number) =>
+    p.values[p.keyTimes.reduce((last, kt, i) => (kt <= t ? i : last), 0)] === 'visible'
+  let frame = 0
+  for (const [pose, frames] of SCENE_SEQUENCE) {
+    for (let f = frame; f < frame + frames; f++) {
+      const t = (f + 0.5) / total
+      const visible = poses.flatMap((p, k) => (shown(p, t) ? [k] : []))
+      expect(visible, `frame ${f}: the poses showing`).toEqual([pose])
+    }
+    frame += frames
   }
 })
 
-test('the laptop rises from the ground and sinks back, and the typist keeps four whole legs', async () => {
-  const box = crabBox(bandRow({ ...BAND, isDone: false }))
-  const [, values = ''] = /<animateTransform[^>]*values="([^"]+)"/.exec(box) ?? []
-  const lows = values.split(';').map(v => Number(v.split(' ')[1]))
-  const deepest = Math.max(...lows)
-  expect(lows[0], 'the laptop starts low').toBe(deepest)
-  expect(lows.at(-1), 'and ends low').toBe(deepest)
-  expect(lows, 'it reaches the top').toContain(0)
-
-  const scene = rects(box).filter(r => inGroup(r, 'scene'))
-  const body = bodyOf(scene, 'typist')
-  expectLegs(scene, body, 'typist')
-  // The typing arm reaches the laptop's deck.
-  const deck = scene.find(r => r.w === 16 && r.h === 2)
-  const arm = scene.find(r => inGroup(r, 'key'))
-  expect(deck && arm && arm.x === deck.x + deck.w, 'the arm meets the deck').toBe(true)
+test('the scene starts and ends on the crab\'s own pixels, so the hand-off is seamless', async () => {
+  for (const isDone of [false, true]) {
+    const box = crabBox(bandRow({ ...BAND, isDone }))
+    const now = pixelsOf(rects(box).filter(r => !inGroup(r, 'pose') && r.w !== 24))
+    const poses = posesIn(box)
+    const first = poses[SCENE_SEQUENCE[0]![0]]!
+    const last = poses[SCENE_SEQUENCE.at(-1)![0]]!
+    // The crab's outline: body and eyes together, whatever its eyes are doing.
+    const outline = (pixels: Map<string, Set<string>>) => [
+      ...new Set([...(pixels.get('#D97757') ?? []), ...(pixels.get('#1A1A1A') ?? [])]),
+    ]
+    const crabOutline = outline(now)
+    // It opens on the crab exactly; working, its eyes too (resting, the crab's are its happy ones).
+    expect(outline(first.pixels).sort(), `${who(isDone)}: first pose's outline`).toEqual([...crabOutline].sort())
+    if (!isDone) {
+      expect([...(first.pixels.get('#1A1A1A') ?? [])].sort(), 'first pose: eyes').toEqual(
+        [...(now.get('#1A1A1A') ?? [])].sort(),
+      )
+    }
+    // It closes as the recording does, on the frame before the crab stands as it was: its
+    // arms a row lower, all else the crab's own.
+    const xs = crabOutline.map(p => Number(p.split(',')[0]))
+    const isArm = (p: string) => Number(p.split(',')[0]) < Math.min(...xs) + 4 || Number(p.split(',')[0]) > Math.max(...xs) - 4
+    const lowered = crabOutline.map(p => (isArm(p) ? `${p.split(',')[0]},${Number(p.split(',')[1]) + 1}` : p))
+    expect(outline(last.pixels).sort(), `${who(isDone)}: last pose's outline`).toEqual(lowered.sort())
+  }
 })
+
+const who = (isDone: boolean) => (isDone ? 'done' : 'working')
