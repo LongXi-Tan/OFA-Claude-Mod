@@ -244,6 +244,48 @@ test('a finished agent woken again runs a second round', async ($, on) => {
   await ui.unmount()
 })
 
+/** The band's drawing, as a fresh mount draws it. */
+async function bandSource($: Engine, isWorking: boolean) {
+  const ui = await $.ui.mount(band(isWorking))
+  const svg = await ui.find({ type: 'Svg' })
+  await ui.unmount()
+  return String(svg?.props.source ?? '')
+}
+
+test('the bar plays each step from the counts before it: an end forward, a wake back, Done not again', async ($, on) => {
+  const { clock } = engine(on)
+  await start($)
+  await say($, 'polish the bar')
+  await clock.settle()
+  await mainTurn($, 't1')
+  await spawn($, 'a')
+  await clock.advance(1_000)
+  await spawn($, 'b')
+  await clock.advance(1_000)
+  await endAgent($, 'a')
+  const ended = await bandSource($, true)
+  expect(ended, 'a finished agent').toMatch(/<g class="slide" style="--from:-\d+px">/)
+  expect(ended).toMatch(/<g class="grow g\d">/)
+  // Its numbers climbing, nothing new to count: the same drawing, so the frame plays on.
+  await clock.advance(1_000)
+  expect(await bandSource($, true)).toBe(ended)
+
+  await $.turn.start({ text: 'one more thing', turnId: 'turn-a2', agentId: 'agent-a' })
+  const woken = await bandSource($, true)
+  expect(woken, 'the agent woken again').toMatch(/<g class="slide" style="--from:\d+px">/)
+  expect(woken).not.toMatch(/class="grow/)
+
+  await clock.advance(1_000)
+  await endAgent($, 'a')
+  await clock.advance(1_000)
+  await endAgent($, 'b')
+  expect(await bandSource($, true)).toMatch(/<g class="slide" style="--from:-\d+px">/)
+  await endMain($, 't1')
+  const done = await bandSource($, false)
+  expect(done).toMatch(/breathe-done/)
+  expect(done, 'Done').not.toMatch(/class="(slide|fade|appear|grow[^"]*|tick gone)"/)
+})
+
 test('an interrupted agent shows as stopped, not failed', async ($, on) => {
   engine(on)
   await start($)

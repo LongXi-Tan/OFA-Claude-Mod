@@ -5,10 +5,9 @@
 // the upper third, 4x4 arms at the sides and four 2x4 legs beneath, the outer two flush
 // with its sides.
 
-import { SCENE_BODY, SCENE_FPS, SCENE_POSES, SCENE_SEQUENCE } from './scene'
+import { SCENE_BODY, SCENE_FPS, SCENE_POSES, SCENE_SEQUENCE, SCENE_TYPING } from './scene'
 
 const BODY = '#D97757'
-const SHADE = '#B85F44'
 const GREY = '#9A9A9A'
 const EYE = '#1A1A1A'
 
@@ -170,63 +169,41 @@ export const agentSprite = (design: number, mood: CrabMood): string => {
 }
 
 const MAIN_CSS = `
-.rise{animation:rise .5s steps(3) both}
-@keyframes rise{0%{transform:translateY(8px);opacity:0}100%{transform:translateY(0);opacity:1}}
-.open{transform-box:fill-box;transform-origin:50% 100%;animation:open .45s steps(3) .5s both}
-@keyframes open{0%{transform:scaleY(0)}100%{transform:scaleY(1)}}
-.line{transform-box:fill-box;transform-origin:0 50%;animation:type 2.4s steps(6) infinite both}
-.l1{animation-delay:1s}.l2{animation-delay:1.5s}.l3{animation-delay:2s}
-@keyframes type{0%{transform:scaleX(0)}45%,100%{transform:scaleX(1)}}
-.cur{animation:tw .6s steps(1) infinite}
-@keyframes tw{0%{opacity:1}50%{opacity:0}}
-.tap{animation:tap .25s steps(1) infinite 1s}
-.tap.d{animation-delay:1.12s}
-@keyframes tap{0%{transform:translateY(0)}50%{transform:translateY(1px)}}
-.blink{animation:blink 4s steps(1) infinite}
-@keyframes blink{0%{opacity:1}95%{opacity:0}97%{opacity:1}}
 .zz{animation:zz 2.4s steps(6) infinite}
 .zz.d{animation-delay:-1.2s}
 @keyframes zz{0%{transform:translate(0,0);opacity:0}20%{opacity:1}100%{transform:translate(4px,-6px);opacity:0}}
 `
 
+// The scene's 34x23 poses sit a unit down and 9 in, so its laptop and crab are centred in 52x24.
+const MAIN_BODY = { x: SCENE_BODY.x + 9, y: SCENE_BODY.y + 1 }
+
 /**
- * The main session's crab, 52x24 units. Working: it pulls out a laptop, opens it
- * and types, code lines filling the screen. Idle: the laptop is shut and it dozes.
+ * The main session's crab, 52x24 units, drawn from the band's recorded scene. Working: it
+ * pulls the laptop down and turns to it once, then types on it for as long as the turn
+ * runs. Idle: it stands as the scene leaves it, eyes shut, dozing.
  */
 export const mainSprite = (isWorking: boolean): string => {
-  const ox = 6
-  const oy = 6
-  const feet = legs(ox, oy, BODY)
+  const { x: ox, y: oy } = MAIN_BODY
 
   if (!isWorking) {
+    // The scene's opening pose with the top row of each eye shut.
+    const rows = SCENE_POSES[0]!.map((row, y) => (y === SCENE_BODY.y + 2 ? row.replace(/E/g, 'O') : row))
     const z = (cls: string) =>
-      `<text x="24" y="8" font-size="6" font-family="monospace" fill="#9AA3AD" class="${cls}">z</text>`
-    return svg(
-      52,
-      24,
-      MAIN_CSS,
-      r(ox, oy, 16, 12, BODY) + r(ox - 4, oy + 4, 4, 4, BODY) + r(ox + 16, oy + 4, 4, 4, BODY) +
-        r(ox + 2, oy + 3, 2, 1, EYE) + r(ox + 12, oy + 3, 2, 1, EYE) + feet +
-        r(28, 19, 22, 3, '#9AA3AD') + r(28, 19, 22, 1, '#C3CAD2') + z('zz') + z('zz d'),
-    )
+      `<text x="44" y="8" font-size="6" font-family="monospace" fill="#9AA3AD" class="${cls}">z</text>`
+    return svg(52, 24, MAIN_CSS, posePaths(rows, ox, oy) + z('zz') + z('zz d'))
   }
 
-  // Facing the laptop: eyes shifted right, the right side in shade, the right arm on the keys.
-  const torso =
-    r(ox, oy, 16, 12, BODY) + r(ox + 14, oy, 2, 12, SHADE) +
-    `<g class="blink">${r(ox + 3, oy + 2, 2, 2, EYE)}${r(ox + 13, oy + 2, 2, 2, EYE)}</g>`
-  const arms =
-    `<g class="tap">${r(ox - 4, oy + 4, 4, 4, BODY)}</g>` +
-    `<g class="tap d">${r(ox + 16, oy + 6, 8, 3, BODY)}</g>`
-  const laptop =
-    `<g class="rise">` +
-    r(27, 21, 24, 2, '#9AA3AD') + r(28, 20, 22, 1, '#C3CAD2') +
-    `<g class="open">${r(30, 4, 18, 16, '#3C4048')}${r(32, 6, 14, 12, '#14202E')}` +
-    r(34, 8, 7, 2, '#7FD1AE', 'line l1') + r(35, 11, 9, 2, '#79A8FF', 'line l2') +
-    r(34, 14, 5, 2, '#F2B36B', 'line l3') + r(40, 14, 2, 2, '#FFFFFF', 'cur') +
-    `</g></g>`
-
-  return svg(52, 24, MAIN_CSS, laptop + torso + arms + feet)
+  const intro = SCENE_SEQUENCE.slice(0, SCENE_TYPING[0])
+  const typing = SCENE_SEQUENCE.slice(...SCENE_TYPING)
+  const introS = (framesOf(intro) / SCENE_FPS).toFixed(3)
+  const typingS = (framesOf(typing) / SCENE_FPS).toFixed(3)
+  return svg(
+    52,
+    24,
+    '',
+    scenePoses(intro, ox, oy, `begin="0s" dur="${introS}s"`) +
+      scenePoses(typing, ox, oy, `begin="${introS}s" dur="${typingS}s" repeatCount="indefinite"`),
+  )
 }
 
 /** A thin progress bar, `fraction` 0..1, `width` CSS pixels wide. */
@@ -291,10 +268,28 @@ const H = 20 // the bar's height
 const R = H / 2 // its ends are half circles
 const PILL_W = 52 // one size in every state: the Done pill's
 const CRAB_W = 28 // the crab's room at the band's right end
-const SCENE_W = 16 // the room left of the crab its click scene reaches into, over the percent
+const SCENE_W = 16 // the room left of the crab its click scene reaches into
 const PERCENT_W = 36 // kept whether or not there is a percent, so the bar never jumps
+const PERCENT_GAP = 2 // from the percent to the crab's box: 10 to the scene's nearest pixel
 const WAVES = 20 // the shimmer sweeps the trail over this many slices
 const SPARKS = 6 // sets of dots that twinkle white, each on its own beat
+const SLIDE_S = 0.7 // seconds a step takes: the pill slides, the trail fills in behind it
+const EASE = [0.22, 0.8, 0.3, 1] as const // the slide's cubic-bezier: quick off the mark, then settling
+const GROWS = 8 // the trail a step earns comes in over this many stretches, each as the pill passes it
+
+/** When, as a share of the slide's time, the pill has come `share` of its way. */
+const whenAt = (share: number) => {
+  const curve = (s: number, a: number, b: number) => 3 * a * s * (1 - s) ** 2 + 3 * b * s ** 2 * (1 - s) + s ** 3
+  const goal = Math.max(0, Math.min(1, share))
+  let lo = 0
+  let hi = 1
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2
+    if (curve(mid, EASE[1], EASE[3]) < goal) lo = mid
+    else hi = mid
+  }
+  return curve((lo + hi) / 2, EASE[0], EASE[2])
+}
 
 /**
  * The band's height, its middle line at the centre. Measured off screenshots: with the
@@ -311,9 +306,6 @@ const LEVELS = [0.55, 1]
 // The shimmer: working, a quick sweep and a rest; done, a slower, softer one.
 const SWEEP = { work: { cycle: 2.4, cross: 1.3 }, done: { cycle: 3.6, cross: 2.2 } }
 
-const delays = (cls: string, cross: number) =>
-  Array.from({ length: WAVES }, (_, k) => `.${cls}${k}{animation-delay:${((k * cross) / WAVES).toFixed(3)}s}`).join('')
-
 const BAND_CSS = `
 .fg{fill:#ECECEC}.dim{fill:#9A9A9A}.track{fill:#FFFFFF;fill-opacity:.07}.tick{fill:#FFFFFF;fill-opacity:.3}
 @media (prefers-color-scheme: light){.fg{fill:#1F1F1E}.dim{fill:#6B6B6B}.track{fill:#000000;fill-opacity:.06}.tick{fill:#000000;fill-opacity:.25}}
@@ -321,27 +313,63 @@ const BAND_CSS = `
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 .w{animation:wave ${SWEEP.work.cycle}s linear infinite;opacity:.4}
 @keyframes wave{0%{opacity:.4}6%{opacity:1}18%{opacity:.7}36%,100%{opacity:.4}}
-${delays('k', SWEEP.work.cross)}
 .wd{animation:wave-done ${SWEEP.done.cycle}s ease-in-out infinite;opacity:.6}
 @keyframes wave-done{0%{opacity:.6}10%{opacity:1}28%{opacity:.8}45%,100%{opacity:.6}}
-${delays('j', SWEEP.done.cross)}
 .sp{fill:#FFFFFF;opacity:0;animation:spark 2.8s ease-in-out infinite}
 .spd{animation-duration:4.2s}
 @keyframes spark{0%,70%,100%{opacity:0}80%{opacity:.95}90%{opacity:0}}
-${Array.from({ length: SPARKS }, (_, s) => `.s${s}{animation-delay:-${((s * 2.8) / SPARKS).toFixed(2)}s}`).join('')}
 .breathe{animation:breathe 2.4s ease-in-out infinite}
 @keyframes breathe{0%,100%{fill:#8B7CF6}50%{fill:#A396FF}}
 .breathe-done{animation:breathe-done 3.6s ease-in-out infinite}
 @keyframes breathe-done{0%,100%{fill:#5BBF8A}50%{fill:#76D3A2}}
 .pd{animation:pd 1.2s ease-in-out infinite;opacity:.35}
-.pd1{animation-delay:.2s}.pd2{animation-delay:.4s}
 @keyframes pd{0%,100%{opacity:.35}30%{opacity:1}}
+.slide{animation:slide ${SLIDE_S}s cubic-bezier(${EASE.join(',')}) both}
+@keyframes slide{from{transform:translateX(var(--from))}to{transform:translateX(0)}}
+.fade{animation:fade ${SLIDE_S}s ease-in-out both}
+.gone{animation:fade .1s linear both}
+@keyframes fade{from{opacity:1}to{opacity:0}}
+.appear{animation:appear ${SLIDE_S}s ease-in-out both}
+.grow{animation:appear .15s ease-out both}
+@keyframes appear{from{opacity:0}to{opacity:1}}
+${Array.from({ length: GROWS }, (_, g) => `.g${g}{animation-delay:${(whenAt(g / GROWS) * SLIDE_S).toFixed(3)}s}`).join('')}
 `
+
+/**
+ * Where each looping animation of the bar stands `at` ms on the clock. A step draws the
+ * band in a new frame, and a new frame starts its animations over; set to the clock
+ * instead, the shimmer, the sparks and the pill's breath carry on where the last frame
+ * left them.
+ */
+const phaseCss = (at: number) => {
+  const behind = (cycle: number, delay = 0) => `animation-delay:${(delay - ((at / 1000) % cycle)).toFixed(3)}s`
+  return [
+    `.pulse{${behind(1.6)}}.breathe{${behind(2.4)}}.breathe-done{${behind(3.6)}}`,
+    ...Array.from({ length: WAVES }, (_, k) => `.k${k}{${behind(SWEEP.work.cycle, (k * SWEEP.work.cross) / WAVES)}}`),
+    ...Array.from({ length: WAVES }, (_, k) => `.j${k}{${behind(SWEEP.done.cycle, (k * SWEEP.done.cross) / WAVES)}}`),
+    ...Array.from({ length: SPARKS }, (_, s) => `.s${s}{${behind(2.8, -(s * 2.8) / SPARKS)}}`),
+    ...[0, 0.2, 0.4].map((delay, i) => `.pd${i}{${behind(1.2, delay)}}`),
+  ].join('')
+}
 
 /** Whether a dot centred at (cx, cy) lies inside the bar's rounded track of width `W`. */
 const inTrack = (cx: number, cy: number, W: number) => {
   const x = Math.min(Math.max(cx, R), W - R)
   return (cx - x) ** 2 + (cy - R) ** 2 <= (R - 0.5) ** 2
+}
+
+/** A trail's look: its shades, its shimmer's classes, and how thick its dots lie `t` of the way along. */
+type Look = { shades: readonly string[]; wave: string; delay: string; density: (t: number) => number }
+const LOOKS: Record<'work' | 'done', Look> = {
+  work: { shades: SHADES.work, wave: 'w', delay: 'k', density: t => 0.1 + 0.85 * t ** 1.4 },
+  done: { shades: SHADES.done, wave: 'wd', delay: 'j', density: t => 0.35 + 0.55 * t },
+}
+
+/** The dot at (x, y) of a trail `length` long, if it has one: its shade and its shimmer's slice. */
+const dotAt = (x: number, y: number, length: number, look: Look) => {
+  const t = length > 0 ? x / length : 0
+  if (x + 2 > length || hash(x, y) >= look.density(t)) return undefined
+  return { t, shade: t < 0.45 ? 0 : t < 0.8 ? 1 : 2, slice: Math.min(WAVES - 1, Math.floor(t * WAVES)) }
 }
 
 /**
@@ -350,45 +378,75 @@ const inTrack = (cx: number, cy: number, W: number) => {
  * sweeping it from the start, a few dots twinkling white. The pill sits at its head, one
  * size in every state, glossy, its colour breathing; a tick marks each step to come. Done,
  * the whole bar turns green and keeps shimmering, slower and softer.
+ *
+ * `from`, the fraction the bar stood at before the latest step: the drawing opens on the
+ * bar as it stood and plays the step once, as it loads. The pill slides to its new place;
+ * the trail it earns comes in stretch by stretch as the pill passes; the trail it had
+ * eases from its old dots to its new ones, which lie thinner or thicker now its length
+ * has changed; a tick the pill reaches goes under it. Played out, the bar is exactly the
+ * one drawn with no `from`.
  */
-const barMarkup = (W: number, done: number, total: number, isDone: boolean): string => {
+const barMarkup = (W: number, done: number, total: number, isDone: boolean, from?: number): string => {
   const fraction = isDone ? 1 : total > 0 ? done / total : 0
-  const pillX = Math.round((W - PILL_W) * fraction)
+  const pillAt = (f: number) => Math.round((W - PILL_W) * Math.max(0, Math.min(1, f)))
+  const pillX = pillAt(fraction)
   const trail = isDone ? W - R : pillX + R // the pill's left half hides the trail's end
-  const shades = isDone ? SHADES.done : SHADES.work
-  const [wave, delay, spark] = isDone ? ['wd', 'j', ' spd'] : ['w', 'k', '']
+  const look = isDone ? LOOKS.done : LOOKS.work
+  const fromX = from === undefined ? pillX : pillAt(from)
+  const slide = fromX - pillX // negative: it moves right
+  const before = slide === 0 ? undefined : fromX + R // the trail the bar had, working
+  // Which of the stretches the pill passes on its way right holds x.
+  const stretch = (x: number) => Math.max(0, Math.min(GROWS - 1, Math.floor(((x - fromX) / (pillX - fromX)) * GROWS)))
 
-  // One path per slice, shade and brightness; every dot a 2x2 square on a 3px grid.
-  const paths = new Map<string, string>()
+  // One path per part, look, slice, shade and brightness; every dot a 2x2 square on a 3px
+  // grid. With no step, every dot is `kept`. A step's other parts: `fade`, the old dots the
+  // new picture lacks or shades otherwise; `appear`, the new ones in their place; and
+  // `g0` on, the trail earned, a stretch each.
+  const parts = new Map<string, Map<string, string>>()
+  const add = (part: string, lk: Look, dot: { slice: number; shade: number }, level: number, x: number, y: number) => {
+    const paths = parts.get(part) ?? new Map<string, string>()
+    const head = `<path class="${lk.wave} ${lk.delay}${dot.slice}" fill="${lk.shades[dot.shade]}" fill-opacity="${LEVELS[level]}" d="`
+    paths.set(head, `${paths.get(head) ?? ''}M${x} ${y}h2v2h-2z`)
+    parts.set(part, paths)
+  }
   const sparks = new Map<number, string>()
-  for (let x = 0; x + 2 <= trail; x += 3) {
-    const t = trail > 0 ? x / trail : 0
-    const density = isDone ? 0.35 + 0.55 * t : 0.1 + 0.85 * t ** 1.4
-    const shade = t < 0.45 ? 0 : t < 0.8 ? 1 : 2
-    const slice = Math.min(WAVES - 1, Math.floor(t * WAVES))
+  for (let x = 0; x + 2 <= Math.max(trail, before ?? 0); x += 3) {
     for (let y = 0; y + 2 <= H; y += 3) {
-      if (!inTrack(x + 1, y + 1, W) || hash(x, y) >= density) continue
+      if (!inTrack(x + 1, y + 1, W)) continue
       const level = hash(y + 11, x + 5) < 0.45 ? 0 : 1
-      const key = `${slice}:${shade}:${level}`
-      paths.set(key, `${paths.get(key) ?? ''}M${x} ${y}h2v2h-2z`)
-      if (t > 0.1 && hash(x + 3, y + 7) < (isDone ? 0.05 : 0.08)) {
-        const s = Math.floor(hash(x + 13, y + 17) * SPARKS)
-        sparks.set(s, `${sparks.get(s) ?? ''}M${x} ${y}h2v2h-2z`)
+      const now = dotAt(x, y, trail, look)
+      const was = before === undefined ? undefined : dotAt(x, y, before, LOOKS.work)
+      if (now && (before === undefined || (look === LOOKS.work && was?.shade === now.shade))) {
+        add('kept', look, now, level, x, y)
+        if (now.t > 0.1 && hash(x + 3, y + 7) < (isDone ? 0.05 : 0.08)) {
+          const s = Math.floor(hash(x + 13, y + 17) * SPARKS)
+          sparks.set(s, `${sparks.get(s) ?? ''}M${x} ${y}h2v2h-2z`)
+        }
+        continue
       }
+      if (was) add('fade', LOOKS.work, was, level, x, y)
+      if (now) add(slide < 0 && x + 2 > (before ?? 0) ? `g${stretch(x)}` : 'appear', look, now, level, x, y)
     }
   }
-  let dots = ''
-  for (const [key, d] of paths) {
-    const [slice, shade, level] = key.split(':').map(Number) as [number, number, number]
-    dots += `<path class="${wave} ${delay}${slice}" fill="${shades[shade]}" fill-opacity="${LEVELS[level]}" d="${d}"/>`
+  const part = (name: string, cls = '') => {
+    const paths = [...(parts.get(name) ?? [])].map(([head, d]) => `${head}${d}"/>`).join('')
+    return paths && cls ? `<g class="${cls}">${paths}</g>` : paths
   }
-  for (const [s, d] of sparks) dots += `<path class="sp s${s}${spark}" d="${d}"/>`
+  let dots = part('kept') + part('fade', 'fade') + part('appear', 'appear')
+  for (let g = 0; g < GROWS; g++) dots += part(`g${g}`, `grow g${g}`)
+  for (const [s, d] of sparks) dots += `<path class="sp s${s}${isDone ? ' spd' : ''}" d="${d}"/>`
 
   let ticks = ''
   if (!isDone) {
     for (let k = 1; k < total; k++) {
       const c = Math.round((W - PILL_W) * (k / total) + PILL_W / 2)
-      if (c > pillX + PILL_W + 3 && c < W - 3) ticks += `<rect class="tick" x="${c}" y="6" width="1" height="8"/>`
+      if (c >= W - 3) continue
+      if (c > pillX + PILL_W + 3) ticks += `<rect class="tick" x="${c}" y="6" width="1" height="8"/>`
+      // A tick the pill reaches on its way right goes as the pill's front covers it.
+      else if (slide < 0 && c > fromX + PILL_W + 3) {
+        const delay = whenAt((c - fromX - PILL_W) / -slide) * SLIDE_S
+        ticks += `<rect class="tick gone" style="animation-delay:${delay.toFixed(3)}s" x="${c}" y="6" width="1" height="8"/>`
+      }
     }
   }
 
@@ -402,16 +460,18 @@ const barMarkup = (W: number, done: number, total: number, isDone: boolean): str
   const text = label
     ? `<text x="${mid}" y="${R}" dominant-baseline="central" text-anchor="middle" font-size="11" font-weight="600" fill="#FFFFFF">${esc(label)}</text>`
     : [-6, 0, 6].map((dx, i) => `<circle class="pd pd${i}" cx="${mid + dx}" cy="${R}" r="1.8" fill="#FFFFFF"/>`).join('')
+  const head = slide === 0 ? pill + text : `<g class="slide" style="--from:${slide}px">${pill}${text}</g>`
 
-  return `<rect class="track" x="0" y="0" width="${W}" height="${H}" rx="${R}"/>${dots}${ticks}${pill}${text}`
+  return `<rect class="track" x="0" y="0" width="${W}" height="${H}" rx="${R}"/>${dots}${ticks}${head}`
 }
 
 // ---- The click scene ------------------------------------------------------------
 
 const SCENE_COLOURS: Record<string, string> = { O: BODY, E: EYE, G: '#878787' }
-const SCENE_FRAMES = SCENE_SEQUENCE.reduce((sum, [, frames]) => sum + frames, 0)
+type Seq = typeof SCENE_SEQUENCE
+const framesOf = (seq: Seq) => seq.reduce((sum, [, frames]) => sum + frames, 0)
 /** How long the scene plays, in seconds: the recording's own length. */
-export const SCENE_S = SCENE_FRAMES / SCENE_FPS
+export const SCENE_S = framesOf(SCENE_SEQUENCE) / SCENE_FPS
 // Every timed part of the scene starts on a click on the crab and lasts as long: SVG
 // timing, no script, so it plays in the app's script-less frame.
 const SCENE = `begin="crab.click" dur="${SCENE_S.toFixed(3)}s"`
@@ -435,16 +495,21 @@ const posePaths = (rows: readonly string[], ox: number, oy: number) => {
     .join('')
 }
 
-/** When each pose shows: visible over each of its runs in the sequence, hidden between. */
-const poseTimes = () => {
+/**
+ * When each pose of `seq` shows over its length: visible over each of its runs, hidden
+ * between. Poses `seq` never plays are left out.
+ */
+const poseTimes = (seq: Seq) => {
+  const total = framesOf(seq)
   const spans: [number, number][][] = SCENE_POSES.map(() => [])
   let at = 0
-  for (const [pose, frames] of SCENE_SEQUENCE) {
+  for (const [pose, frames] of seq) {
     spans[pose]!.push([at, at + frames])
     at += frames
   }
-  const t = (frame: number) => +(frame / SCENE_FRAMES).toFixed(4)
+  const t = (frame: number) => +(frame / total).toFixed(4)
   return spans.map(runs => {
+    if (runs.length === 0) return undefined
     const values: string[] = []
     const times: number[] = []
     if (runs[0]?.[0] !== 0) {
@@ -454,13 +519,26 @@ const poseTimes = () => {
     for (const [a, b] of runs) {
       values.push('visible')
       times.push(t(a))
-      if (b < SCENE_FRAMES) {
+      if (b < total) {
         values.push('hidden')
         times.push(t(b))
       }
     }
     return { values: values.join(';'), keyTimes: times.join(';') }
   })
+}
+
+/** The poses `seq` plays, body top-left at (ox, oy), each shown on its turn under `timing`. */
+const scenePoses = (seq: Seq, ox: number, oy: number, timing: string) => {
+  const times = poseTimes(seq)
+  return SCENE_POSES.map((rows, k) => {
+    const time = times[k]
+    if (!time) return ''
+    return (
+      `<g class="pose" visibility="hidden"><animate attributeName="visibility" calcMode="discrete" ` +
+      `values="${time.values}" keyTimes="${time.keyTimes}" ${timing}/>${posePaths(rows, ox, oy)}</g>`
+    )
+  }).join('')
 }
 
 /**
@@ -478,14 +556,7 @@ const bandCrab = (isDone: boolean) => {
   const crabNow =
     `<g class="${isHopping ? 'walk' : 'still'}"><set attributeName="visibility" to="hidden" ${SCENE}/>` +
     `${crab(ox, oy, BODY, moodEyes(mood, 'open'), isHopping)}</g>`
-  const times = poseTimes()
-  const scene = SCENE_POSES.map((rows, k) => {
-    const { values, keyTimes } = times[k]!
-    return (
-      `<g class="pose" visibility="hidden"><animate attributeName="visibility" calcMode="discrete" ` +
-      `values="${values}" keyTimes="${keyTimes}" ${SCENE}/>${posePaths(rows, ox, oy)}</g>`
-    )
-  }).join('')
+  const scene = scenePoses(SCENE_SEQUENCE, ox, oy, SCENE)
   const hit =
     `<rect id="crab" x="${ox - 4}" y="0" width="24" height="${BAND_H}" fill="#000000" fill-opacity="0" ` +
     `pointer-events="all" style="cursor:pointer"><title>Click: Claude pulls out a laptop and types</title></rect>`
@@ -501,39 +572,47 @@ export type BandRow = {
   done: number
   total: number
   isDone: boolean
+  /** The counts before the latest step, when there was one: the bar fills from there. */
+  from?: { done: number; total: number }
+  /**
+   * When the latest step came, in ms on the session's clock. The bar's looping animations
+   * are set to that moment, so the frame drawn for a step carries them on.
+   */
+  at?: number
 }
 
 /**
  * The whole band but its buttons, `width` x BAND_H CSS pixels, as one drawing so the dot,
  * title, bar, percent and crab share one middle line: every text sits on it with
- * `dominant-baseline="central"`, and the bar and crab are centred on it.
+ * `dominant-baseline="central"`, and the bar and crab are centred on it. The crab's box
+ * keeps clear of the percent, so its click scene never covers it.
  */
 export const bandRow = (b: BandRow): string => {
   const W = Math.max(220, Math.round(b.width))
   const FONT = `font-family="system-ui,'Segoe UI',sans-serif"`
-  const crabX = W - CRAB_W
-  const barRight = crabX - 10 - PERCENT_W
+  const crabBox = W - SCENE_W - CRAB_W
+  const percentRight = crabBox - PERCENT_GAP
+  const barRight = percentRight - PERCENT_W
   const titleMax = Math.max(40, Math.min(340, W * 0.38, barRight - 32 - 90))
   const title = fitText(b.title, titleMax)
   const titleW = Math.min(titleMax, Math.round(textWidth(title) * 100) / 100)
   const barX = Math.ceil(18 + titleW + 14)
   const barW = Math.max(PILL_W + 20, barRight - barX)
   const fraction = b.isDone ? 1 : b.total > 0 ? b.done / b.total : 0
-  // The percent steps aside while the click scene uses the room beside it.
-  const fade = `<animate attributeName="opacity" values="1;0;0;1" keyTimes="0;.06;.94;1" ${SCENE}/>`
+  const from = b.from && (b.from.total > 0 ? b.from.done / b.from.total : 0)
 
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${BAND_H}" width="${W}" height="${BAND_H}" ${FONT}>` +
-    `<style>${BAND_CSS}${BASE_CSS}</style>` +
+    `<style>${BAND_CSS}${BASE_CSS}${phaseCss(b.at ?? 0)}</style>` +
     `<circle${b.isDone ? '' : ' class="pulse"'} cx="6" cy="${MID}" r="4" fill="${b.isDone ? '#5BBF8A' : '#8B7CF6'}"/>` +
     // `textLength` holds the title to the width it was given, so a font wider than
     // Segoe UI (another machine's system-ui) still never runs into the bar.
     `<text class="fg" x="18" y="${MID}" dominant-baseline="central" font-size="13" font-weight="600" textLength="${titleW}" lengthAdjust="spacingAndGlyphs">${esc(title)}</text>` +
-    `<g transform="translate(${barX} ${MID - R})">${barMarkup(barW, b.done, b.total, b.isDone)}</g>` +
+    `<g transform="translate(${barX} ${MID - R})">${barMarkup(barW, b.done, b.total, b.isDone, from)}</g>` +
     (b.total > 0
-      ? `<text class="dim" x="${barRight + PERCENT_W}" y="${MID}" dominant-baseline="central" text-anchor="end" font-size="12">${Math.round(fraction * 100)}%${fade}</text>`
+      ? `<text class="dim" x="${percentRight}" y="${MID}" dominant-baseline="central" text-anchor="end" font-size="12">${Math.round(fraction * 100)}%</text>`
       : '') +
-    `<svg x="${crabX - SCENE_W}" y="0" width="${SCENE_W + CRAB_W}" height="${BAND_H}" viewBox="0 0 ${SCENE_W + CRAB_W} ${BAND_H}" shape-rendering="crispEdges">` +
+    `<svg x="${crabBox}" y="0" width="${SCENE_W + CRAB_W}" height="${BAND_H}" viewBox="0 0 ${SCENE_W + CRAB_W} ${BAND_H}" shape-rendering="crispEdges">` +
     `${bandCrab(b.isDone)}</svg>` +
     `</svg>`
   )

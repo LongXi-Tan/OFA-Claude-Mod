@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { SCENE_POSES, SCENE_SEQUENCE } from './scene'
-import { DESIGNS, SCENE_S, agentSprite, bandRow } from './sprites'
+import { SCENE_POSES, SCENE_SEQUENCE, SCENE_TYPING } from './scene'
+import { DESIGNS, SCENE_S, agentSprite, bandRow, mainSprite } from './sprites'
 import type { CrabMood } from './sprites'
 
 // The sprites are SVG strings, so these tests read the drawing itself: every rect, the
@@ -188,14 +188,31 @@ test('a click on the band crab plays the recorded scene in its place, then gives
       /<rect id="crab" x="\d+" y="0" width="24" height="\d+" fill="#000000" fill-opacity="0" pointer-events="all"[^>]*>(<title>[^<]*<\/title>)?<\/rect><\/svg><\/svg>$/,
     )
     // Every timed part starts on that click and lasts the recording's length: the crab
-    // stepping out, the percent stepping aside, and each pose.
+    // stepping out, and each pose. The percent stays as it is.
     const timings = [...svg.matchAll(/begin="([^"]+)" dur="([^"]+)"/g)].map(m => `${m[1]} ${m[2]}`)
-    expect(timings, `${who}: timed parts`).toHaveLength(2 + SCENE_POSES.length)
+    expect(timings, `${who}: timed parts`).toHaveLength(1 + SCENE_POSES.length)
     expect([...new Set(timings)], `${who}: their timing`).toEqual([`crab.click ${SCENE_S.toFixed(3)}s`])
     expect(svg).toMatch(/<g class="(walk|still)"><set attributeName="visibility" to="hidden" begin="crab\.click"/)
-    expect(svg).toMatch(/%<animate attributeName="opacity" values="1;0;0;1" keyTimes="0;\.06;\.94;1" begin="crab\.click"/)
+    expect(svg, `${who}: the percent`).toMatch(/<text class="dim" [^>]*>\d+%<\/text>/)
   }
   expect(SCENE_S.toFixed(3), 'the scene lasts as long as the recording').toBe((95 / 30).toFixed(3))
+})
+
+test('the scene plays clear of the percent, and inside the band', async () => {
+  for (const width of [260, 640, 1108]) {
+    for (const isDone of [false, true]) {
+      const svg = bandRow({ ...BAND, width, isDone })
+      const at = `${who(isDone)} at ${width}`
+      const W = Number(/viewBox="0 0 (\d+) /.exec(svg)?.[1])
+      const percentEnd = Number(/<text class="dim" x="([\d.]+)"[^>]*text-anchor="end"[^>]*>\d+%<\/text>/.exec(svg)?.[1])
+      const [, boxX = '', boxW = ''] = /<svg x="(\d+)" y="0" width="(\d+)"/.exec(svg) ?? []
+      const xs = posesIn(crabBox(svg)).flatMap(p => [...p.pixels.values()].flatMap(set => [...set].map(px => Number(px.split(',')[0]))))
+      // The percent ends where its text anchors; the scene's nearest pixel stands well right of it.
+      expect(Number(boxX) + Math.min(...xs) - percentEnd, `${at}: from the percent to the scene`).toBeGreaterThanOrEqual(8)
+      expect(Math.max(...xs) < Number(boxW), `${at}: the scene inside the crab's box`).toBe(true)
+      expect(Number(boxX) + Number(boxW) <= W, `${at}: the crab's box inside the band`).toBe(true)
+    }
+  }
 })
 
 test('every moment of the scene shows exactly one pose, in the recording\'s order', async () => {
@@ -245,3 +262,115 @@ test('the scene starts and ends on the crab\'s own pixels, so the hand-off is se
 })
 
 const who = (isDone: boolean) => (isDone ? 'done' : 'working')
+
+/** The bar's dots, each `x,y fill opacity`, from the groups `isIn` takes by their classes, outermost first. */
+function barDots(svg: string, isIn: (classes: string[]) => boolean) {
+  const found = new Set<string>()
+  const groups: string[] = []
+  for (const [tag] of svg.matchAll(/<\/g>|<g\b[^>]*>|<path class="wd? [^"]*"[^>]*\/>/g)) {
+    if (tag === '</g>') groups.pop()
+    else if (tag.startsWith('<g')) groups.push(/\bclass="([^"]*)"/.exec(tag)?.[1] ?? '')
+    else if (isIn(groups.flatMap(g => g.split(' ')))) {
+      const [, fill, level, d = ''] = /fill="([^"]+)" fill-opacity="([^"]+)" d="([^"]+)"/.exec(tag) ?? []
+      for (const [, x, y] of d.matchAll(/M(\d+) (\d+)h2v2h-2z/g)) found.add(`${x},${y} ${fill} ${level}`)
+    }
+  }
+  return [...found].sort()
+}
+
+const pillX = (svg: string) => Number(/<rect class="breathe(?:-done)?" x="(\d+)"/.exec(svg)?.[1])
+
+test('a step opens on the bar as it stood and plays out to the bar as it stands', async () => {
+  const was = bandRow({ ...BAND, done: 1, total: 4, isDone: false })
+  const is = bandRow({ ...BAND, done: 2, total: 4, isDone: false })
+  const step = bandRow({ ...BAND, done: 2, total: 4, isDone: false, from: { done: 1, total: 4 } })
+  // The dots: at the start, those kept and those going are the old bar's exactly; played
+  // out, those kept, come and earned are the new bar's exactly.
+  const coming = (cs: string[]) => cs.includes('appear') || cs.includes('grow')
+  expect(barDots(step, cs => !coming(cs)), 'the opening dots').toEqual(barDots(was, () => true))
+  expect(barDots(step, cs => !cs.includes('fade')), 'the closing dots').toEqual(barDots(is, () => true))
+  expect(step).toMatch(/<g class="fade">/)
+  // The pill: drawn at its new place, set back to its old one, and slid over.
+  expect(pillX(is) > pillX(was)).toBe(true)
+  expect(step).toContain(`<g class="slide" style="--from:${pillX(was) - pillX(is)}px"><rect class="breathe" x="${pillX(is)}"`)
+  expect(rulesFor(step, 'slide')).toEqual(['.slide{animation:slide 0.7s cubic-bezier(0.22,0.8,0.3,1) both}'])
+})
+
+test('the trail a step earns comes in stretch by stretch, each as the pill passes it', async () => {
+  const step = bandRow({ ...BAND, done: 3, total: 4, isDone: false, from: { done: 1, total: 4 } })
+  const delays: number[] = []
+  let lastX = -1
+  for (let g = 0; g < 8; g++) {
+    const xs = barDots(step, cs => cs.includes(`g${g}`)).map(dot => Number(dot.split(',')[0]))
+    if (xs.length === 0) continue
+    // Left to right, the stretches never overlap...
+    expect(Math.min(...xs) > lastX, `stretch ${g} starts past the one before`).toBe(true)
+    lastX = Math.max(...xs)
+    // ...and each comes in later than the one before.
+    const [rule = ''] = rulesFor(step, `g${g}`)
+    delays.push(Number(/animation-delay:([\d.]+)s/.exec(rule)?.[1]))
+  }
+  expect(delays.length > 4, 'stretches earned').toBe(true)
+  expect([...delays].sort((a, b) => a - b)).toEqual(delays)
+  expect(delays[0]).toBe(0)
+  expect(Math.max(...delays) < 0.7, 'all in while the pill slides').toBe(true)
+  // The ticks the pill reaches go as it covers them, the first first; past it, none are left.
+  const gone = [...step.matchAll(/<rect class="tick gone" style="animation-delay:([\d.]+)s" x="(\d+)"/g)]
+  expect(gone).toHaveLength(2)
+  expect(Number(gone[0]?.[1]) < Number(gone[1]?.[1]) && Number(gone[0]?.[2]) < Number(gone[1]?.[2])).toBe(true)
+  expect(step.match(/<rect class="tick" x=/g) ?? []).toHaveLength(0)
+})
+
+test('only a step that moves the pill plays: none, the same counts, or a new agent that leaves it in place', async () => {
+  for (const svg of [
+    bandRow({ ...BAND, isDone: false }),
+    bandRow({ ...BAND, isDone: false, from: { done: BAND.done, total: BAND.total } }),
+    bandRow({ ...BAND, done: 0, total: 3, isDone: false, from: { done: 0, total: 2 } }),
+  ]) {
+    expect(svg).not.toMatch(/class="(slide|fade|appear|grow[^"]*|tick gone)"/)
+  }
+  // A new agent while some are done moves the pill back: it slides left, and earns nothing.
+  const joined = bandRow({ ...BAND, done: 1, total: 3, isDone: false, from: { done: 1, total: 2 } })
+  expect(joined).toMatch(/<g class="slide" style="--from:\d+px">/)
+  expect(joined).not.toMatch(/class="grow/)
+})
+
+test('the shimmer is set to the clock, so a frame drawn for a step carries it on', async () => {
+  const at = (ms: number) => bandRow({ ...BAND, isDone: false, at: ms })
+  const sweep = (svg: string) => rulesFor(svg, 'k\\d+')
+  // A wave's slices stand where the clock has them...
+  expect(sweep(at(1_234))[0]).toBe('.k0{animation-delay:-1.234s}')
+  expect(sweep(at(1_234))[1]).toBe(`.k1{animation-delay:${(1.3 / 20 - 1.234).toFixed(3)}s}`)
+  // ...so a frame drawn a whole sweep later stands the same, and one drawn between does not.
+  expect(sweep(at(1_234 + 2_400))).toEqual(sweep(at(1_234)))
+  expect(sweep(at(1_234 + 1_000))).not.toEqual(sweep(at(1_234)))
+  expect(rulesFor(at(1_234), 'breathe')).toContain('.breathe{animation-delay:-1.234s}')
+})
+
+test('the band stays inside the frame\'s size limit at its widest, mid-step', async () => {
+  for (const isDone of [false, true]) {
+    const svg = bandRow({
+      width: 1108,
+      title: 'Polish the progress bar for daily work',
+      done: 11,
+      total: 24,
+      isDone,
+      ...(isDone ? {} : { from: { done: 1, total: 24 } }),
+      at: 1_700_000_000_000,
+    })
+    expect(svg.length < 131_072, `${who(isDone)}: ${svg.length} characters`).toBe(true)
+  }
+})
+
+test('the main crab works through the recorded scene: the laptop comes out once, then the typing loops', async () => {
+  const svg = mainSprite(true)
+  const timings = [...svg.matchAll(/begin="([^"]+)" dur="([^"]+)"( repeatCount="indefinite")?/g)].map(m => m.slice(1).join(''))
+  const [start, end] = SCENE_TYPING
+  const introPoses = new Set(SCENE_SEQUENCE.slice(0, start).map(([p]) => p))
+  const typingPoses = new Set(SCENE_SEQUENCE.slice(start, end).map(([p]) => p))
+  const introS = (SCENE_SEQUENCE.slice(0, start).reduce((s, [, n]) => s + n, 0) / 30).toFixed(3)
+  expect(timings.filter(t => t.startsWith('0s'))).toHaveLength(introPoses.size)
+  expect(timings.filter(t => t.startsWith(`${introS}s`) && t.endsWith(' repeatCount="indefinite"'))).toHaveLength(typingPoses.size)
+  expect(SCENE_SEQUENCE[start]![0], 'the loop opens and closes on one pose').toBe(SCENE_SEQUENCE[end - 1]![0])
+  expect(mainSprite(false)).not.toContain('<animate')
+})

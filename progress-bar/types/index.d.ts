@@ -19,6 +19,8 @@ export type AgentRow = {
   rounds?: number
   startedAt: number
   endedAt?: number
+  /** When it was last woken for another round; unset until it is. */
+  wokeAt?: number
   /** Tokens processed over all its requests: input, output and cache reads and writes. */
   tokens: number
   costUsd: number

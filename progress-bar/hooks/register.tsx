@@ -48,6 +48,26 @@ const SETTLED: Partial<Record<EngineAgentStatus, AgentStatus>> = {
 const MARK: Record<AgentStatus, string> = { running: '', done: '✓ ', failed: '✗ ', stopped: '■ ' }
 
 const moodOf = (s: AgentStatus): CrabMood => (s === 'running' ? 'working' : s)
+
+/**
+ * The run's latest step, read off its rows alone, never the clock: when it came, and the
+ * counts just before it, when an agent that joined then was not there yet, one that
+ * ended then still ran, and one woken then was still done. The band's bar fills from
+ * those counts. Drawn again with nothing new, the answer is the same, so the drawing is
+ * too and the step never plays twice.
+ */
+function lastStep(run: AgentRow[]): { at: number; done: number; total: number } | undefined {
+  if (run.length === 0) return undefined
+  const at = Math.max(...run.map(a => a.endedAt ?? a.wokeAt ?? a.startedAt))
+  let done = 0
+  let total = 0
+  for (const a of run) {
+    if (a.startedAt >= at) continue
+    total++
+    if (a.status === 'running' ? (a.wokeAt ?? -Infinity) >= at : (a.endedAt ?? -Infinity) < at) done++
+  }
+  return { at, done, total }
+}
 // Work started and not awaited (a press, a pane opened on the side): another plugin's
 // refusal ends it quietly, never as a rejection nothing handles.
 const quietly = (work: Promise<unknown>) => void work.catch(() => undefined)
@@ -117,7 +137,7 @@ async function startTurn($: EngineInterface, agentId: string | undefined) {
     await updateAgents($, list =>
       list.map((a): AgentRow =>
         a.agentId === agentId && a.status !== 'running'
-          ? { ...a, status: 'running', endedAt: undefined, rounds: (a.rounds ?? 1) + 1 }
+          ? { ...a, status: 'running', endedAt: undefined, wokeAt: at, rounds: (a.rounds ?? 1) + 1 }
           : a,
       ),
     )
@@ -514,16 +534,27 @@ export const register: Register = (on, options) => {
     const title = m.title ?? 'Working'
     const percent = run.length > 0 ? Math.round(((isDone ? run.length : done) / run.length) * 100) : 0
     const state = isDone ? 'done' : run.length > 0 ? `${done} of ${run.length} done, ${percent}%` : 'working'
+    // Working, the bar plays its latest step as it is drawn. Done, it stands full: the
+    // step that filled it played while the run worked, and is not played again.
+    const step = lastStep(run)
     // The dot, title, bar, percent and crab are one drawing, so they share a middle line;
     // the two buttons sit at the right end, the ▼ exactly where a folded band's ▲ is.
-    const rowW = Math.round(Math.max(260, Math.min(1100, (e.props.bodyColumns || 100) * 8 - 90)))
+    const rowW = Math.round(Math.max(260, Math.min(1108, (e.props.bodyColumns || 100) * 8 - 82)))
 
     return (
       <Box flexDirection="row" flexWrap="nowrap" justifyContent="space-between" alignItems="center" width="100%">
         {Svg ? (
           <Svg
             key={`band-${isDone ? 'done' : 'work'}`}
-            source={bandRow({ width: rowW, title, done, total: run.length, isDone })}
+            source={bandRow({
+              width: rowW,
+              title,
+              done,
+              total: run.length,
+              isDone,
+              from: isDone ? undefined : step,
+              at: step?.at ?? start,
+            })}
             alt={`${title}: ${state}`}
             width={rowW}
             height={BAND_H}

@@ -495,3 +495,10 @@ export const SCENE_SEQUENCE: readonly (readonly [pose: number, frames: number])[
   [10, 2], [11, 3], [12, 2], [10, 3], [13, 2], [14, 3], [15, 2], [16, 3],
   [2, 5], [17, 2], [18, 4],
 ]
+
+/**
+ * The typing stretch of the sequence, as [start, end) indices: before it the crab pulls the
+ * laptop out and turns to it, after it folds it away. It opens and closes on the same pose,
+ * so it loops without a seam.
+ */
+export const SCENE_TYPING: readonly [start: number, end: number] = [12, 28]
