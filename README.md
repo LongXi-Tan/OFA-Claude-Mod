@@ -41,3 +41,5 @@ claude plugin test progress-bar
 To load the mod in every session, name the mod folder in `CLAUDE_CODE_PLUGIN_DIRS` (in `~/.claude/settings.json` under `env`), or start a terminal session with `claude --plugin-dir ./progress-bar`.
 
 ### Attribution
+
+shoutout to JohnnyVizz on the claude-kit (savvy-progress) plug in, big fan of it, and decided to build one mod like this progress bar myself.
