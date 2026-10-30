@@ -42,4 +42,4 @@ To load the mod in every session, name the mod folder in `CLAUDE_CODE_PLUGIN_DIR
 
 ### Attribution
 
-shoutout to JohnnyVizz on the claude-kit (savvy-progress) plug in, big fan of it, and decided to build one mod like this progress bar myself.
+shoutout to JohnnyVizz on the claude-kit (savvy-progress) plug in, big fan of the that plug in he made, and decided to build one mod like this progress bar myself.
