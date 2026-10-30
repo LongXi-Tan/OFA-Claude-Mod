@@ -9,13 +9,16 @@ import type {
   TurnUsage,
 } from 'claude-code'
 
-import type { AgentRow, AgentStatus } from '../types'
+import type { AgentRow, AgentStatus, PlanTask } from '../types'
 import { DEMO_MS, DEMO_TITLE, clearDemo, runDemo } from './demo'
 import { costOf, fmtCost, fmtTime, fmtTokens, modelName, tokensOf, windowOf } from './model'
-import { BAND_H, DESIGNS, agentSprite, bandRow, barSprite, mainSprite } from './sprites'
+import { afterTaskCreate, afterTaskUpdate, afterTodoWrite, afterUpdatePlan, afterWrapUp, countsOf } from './plan'
+import type { Args } from './plan'
+import { BAND_H, DESIGNS, agentSprite, bandBar, bandCrab, bandDot, bandLayout, bandTitle, barSprite, mainSprite } from './sprites'
 import type { CrabMood } from './sprites'
 import {
   EMPTY_MAIN,
+  EMPTY_PLAN,
   KEEP,
   openPane,
   readAgents,
@@ -23,12 +26,14 @@ import {
   readNow,
   isPending,
   readPanel,
+  readPlan,
   runStart,
   setNow,
   togglePane,
   updateAgents,
   updateMain,
   updatePanel,
+  updatePlan,
 } from './state'
 import { nameRun } from './title'
 
@@ -39,6 +44,11 @@ const PERSON = new Set(['composer', 'sdk', 'bridge'])
 const FINISHED_SHOWN = 8
 // How long a run may wait for its first turn before the band stops calling it working.
 const PENDING_MS = 30_000
+// How soon after a turn ends a fresh drawing of the main crab still folds its laptop away.
+const CLOSING_MS = 2_000
+// How long the band keeps a drawing it showed under the one that replaced it: ample for
+// the new one's frame to load and paint.
+const SETTLE_MS = 2_000
 // How the engine's agent list names an agent that is no longer running.
 const SETTLED: Partial<Record<EngineAgentStatus, AgentStatus>> = {
   completed: 'done',
@@ -49,16 +59,17 @@ const MARK: Record<AgentStatus, string> = { running: '', done: '✓ ', failed: '
 
 const moodOf = (s: AgentStatus): CrabMood => (s === 'running' ? 'working' : s)
 
+/** What the bar counts: how many are done, of how many. */
+type Counts = { done: number; total: number }
+/** A step of the count: when it came, and the counts just before it. */
+type Step = Counts & { at: number }
+
 /**
- * The run's latest step, read off its rows alone, never the clock: when it came, and the
- * counts just before it, when an agent that joined then was not there yet, one that
- * ended then still ran, and one woken then was still done. The band's bar fills from
- * those counts. Drawn again with nothing new, the answer is the same, so the drawing is
- * too and the step never plays twice.
+ * The run's counts just before `at`, read off its rows alone: an agent that joined then or
+ * later is not there yet, one that ended then or later still runs, and one woken then or
+ * later is still done. Just before Infinity, they are the counts now.
  */
-function lastStep(run: AgentRow[]): { at: number; done: number; total: number } | undefined {
-  if (run.length === 0) return undefined
-  const at = Math.max(...run.map(a => a.endedAt ?? a.wokeAt ?? a.startedAt))
+function countsBefore(run: AgentRow[], at: number): Counts {
   let done = 0
   let total = 0
   for (const a of run) {
@@ -66,7 +77,20 @@ function lastStep(run: AgentRow[]): { at: number; done: number; total: number } 
     total++
     if (a.status === 'running' ? (a.wokeAt ?? -Infinity) >= at : (a.endedAt ?? -Infinity) < at) done++
   }
-  return { at, done, total }
+  return { done, total }
+}
+
+/**
+ * The run's latest two steps, read off its rows alone, never the clock. The bar fills from
+ * the latest one's counts; the one before tells how the bar was drawn until the latest
+ * came, so the band can keep that drawing up while the new one loads. Drawn again with
+ * nothing new, the answer is the same, so the drawings are too and no step plays twice.
+ */
+function stepsOf(run: AgentRow[]): { last?: Step; prev?: Step } {
+  const times = [...new Set(run.flatMap(a => [a.startedAt, a.endedAt, a.wokeAt].filter(t => t !== undefined)))]
+  times.sort((x, y) => y - x)
+  const step = (at: number | undefined) => (at === undefined ? undefined : { at, ...countsBefore(run, at) })
+  return { last: step(times[0]), prev: step(times[1]) }
 }
 // Work started and not awaited (a press, a pane opened on the side): another plugin's
 // refusal ends it quietly, never as a rejection nothing handles.
@@ -202,7 +226,7 @@ async function addUsage($: EngineInterface, e: TurnStepInput, u: TurnUsage, tool
 async function endTurn($: EngineInterface, e: TurnCompleteInput) {
   const at = await $.clock.now()
   if (e.agentId === undefined) {
-    await updateMain($, m => ({ ...m, isWorking: false, workMs: m.workMs + e.durationMs }))
+    await updateMain($, m => ({ ...m, isWorking: false, workMs: m.workMs + e.durationMs, turnEndedAt: at }))
   } else {
     const agentId = e.agentId
     const status: AgentStatus = e.reason === 'answer' ? 'done' : e.reason === 'aborted' ? 'stopped' : 'failed'
@@ -264,8 +288,38 @@ async function tick($: EngineInterface, shouldCheck: boolean) {
   if (shouldCheck && running.some(a => !a.isDemo && a.agentId !== undefined)) await reconcile($, at)
 }
 
+/**
+ * Writes Claude's task list after one of its tools changed it, for the run now going. A
+ * move forward or back is kept with the counts before it, for the band to play; a list
+ * carried into a new run moves from nothing.
+ */
+async function notePlan($: EngineInterface, change: (tasks: PlanTask[]) => PlanTask[]) {
+  const [m, at] = await Promise.all([readMain($), $.clock.now()])
+  const run = runStart(m)
+  await updatePlan($, p => {
+    const tasks = change(p.tasks)
+    const isSameRun = p.runStartedAt === run
+    const before = isSameRun ? countsOf(p.tasks) : { done: 0, total: 0 }
+    const after = countsOf(tasks)
+    const hasMoved = before.done !== after.done || before.total !== after.total
+    if (!hasMoved) return { runStartedAt: run, tasks, last: isSameRun ? p.last : undefined, prev: isSameRun ? p.prev : undefined }
+    return { runStartedAt: run, tasks, last: { at, ...before }, prev: isSameRun ? p.last : undefined }
+  })
+}
+
+/** After a task-list tool ran: the main session's own list changes, unless the call failed. */
+async function noteTasks(
+  $: EngineInterface,
+  e: { agentId?: string },
+  ran: { deny?: string; isError?: true },
+  change: (tasks: PlanTask[]) => PlanTask[],
+) {
+  if (e.agentId === undefined && ran.deny === undefined && ran.isError === undefined) await notePlan($, change)
+}
+
 async function resetAll($: EngineInterface) {
   await updateAgents($, () => [])
+  await updatePlan($, () => EMPTY_PLAN)
   await updateMain($, m => ({ ...EMPTY_MAIN, model: m.model, effort: m.effort }))
   await updatePanel($, p => ({ ...p, showAllDone: false }))
   listed.clear()
@@ -351,6 +405,39 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // Claude's own task list, which the band counts while the run has one: the app's pinned
+  // list and its wrap-up, and the terminal's todos and tasks. Only the main session's; a
+  // subagent keeps a list of its own.
+  on('tool.call', { tool: 'mcp__ccd_turn__update_plan' }, async ($, e, next) => {
+    const ran = await next(e)
+    await noteTasks($, e, ran, tasks => afterUpdatePlan(tasks, e as unknown as Args)).catch(() => undefined)
+    return ran
+  }).catch(($, e, next) => next(e))
+
+  on('tool.call', { tool: 'mcp__ccd_turn__wrap_up' }, async ($, e, next) => {
+    const ran = await next(e)
+    await noteTasks($, e, ran, afterWrapUp).catch(() => undefined)
+    return ran
+  }).catch(($, e, next) => next(e))
+
+  on('tool.call', { tool: 'TodoWrite' }, async ($, e, next) => {
+    const ran = await next(e)
+    await noteTasks($, e, ran, tasks => afterTodoWrite(tasks, e as unknown as Args)).catch(() => undefined)
+    return ran
+  }).catch(($, e, next) => next(e))
+
+  on('tool.call', { tool: 'TaskCreate' }, async ($, e, next) => {
+    const ran = await next(e)
+    await noteTasks($, e, ran, tasks => afterTaskCreate(tasks, e as unknown as Args, ran.result)).catch(() => undefined)
+    return ran
+  }).catch(($, e, next) => next(e))
+
+  on('tool.call', { tool: 'TaskUpdate' }, async ($, e, next) => {
+    const ran = await next(e)
+    await noteTasks($, e, ran, tasks => afterTaskUpdate(tasks, e as unknown as Args)).catch(() => undefined)
+    return ran
+  }).catch(($, e, next) => next(e))
+
   on('ui.render', { component: 'Pane', requestId: 'progress-bar' }, async ($, e) => {
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
@@ -366,6 +453,10 @@ export const register: Register = (on, options) => {
     const totalCost = m.costUsd + list.reduce((s, a) => s + a.costUsd, 0)
     const totalTokens = m.tokens + list.reduce((s, a) => s + a.tokens, 0)
     const workMs = m.workMs + (m.isWorking ? at - m.turnStartedAt : 0)
+    // A turn just ended: the crab folds its laptop away before it dozes. Drawn afresh any
+    // later (the pane opened again), it is simply dozing.
+    const isClosing =
+      !m.isWorking && m.turnEndedAt !== undefined && (await $.clock.now()) - m.turnEndedAt < CLOSING_MS
 
     const stat = (key: string, label: string, value: string) => (
       <Box key={key} flexDirection="column" flexGrow={1} paddingX={1} borderStyle="round" borderDimColor>
@@ -385,8 +476,6 @@ export const register: Register = (on, options) => {
         ' · ',
       )
       const who = [
-        DESIGNS[a.design % DESIGNS.length],
-        a.subagentType,
         modelName(a.model),
         a.effort,
         (a.rounds ?? 1) > 1 ? `round ${a.rounds}` : undefined,
@@ -448,7 +537,7 @@ export const register: Register = (on, options) => {
           {Svg ? (
             <Svg
               key={`main-${m.isWorking ? 'work' : 'idle'}`}
-              source={mainSprite(m.isWorking)}
+              source={mainSprite(m.isWorking, isClosing)}
               alt={m.isWorking ? 'Main crab typing on its laptop' : 'Main crab dozing'}
               width={104}
               height={48}
@@ -502,7 +591,7 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // No read of `now` here: the band redraws only when the work changes, so its shine runs unbroken.
-    const [list, m, p] = await Promise.all([readAgents($), readMain($), readPanel($)])
+    const [list, m, p, plan] = await Promise.all([readAgents($), readMain($), readPanel($), readPlan($)])
     const start = runStart(m)
     const run = list.filter(a => a.startedAt >= start)
     const isWorking = e.props.isWorking || m.isWorking || isPending(m) || list.some(a => a.status === 'running')
@@ -529,51 +618,107 @@ export const register: Register = (on, options) => {
     }
     // The terminal's table lists an Svg too but hands it on as an empty box: there the words stand in.
     const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
+    // At the right end, the ▼ exactly where a folded band's ▲ is.
+    const buttons = (
+      <Box flexDirection="row" alignItems="center" gap={1}>
+        <Button key="open-agents" plain label={`×${list.length}`} onPress={() => quietly(togglePane($))} />
+        <Button
+          key="band-toggle"
+          plain
+          label="▼"
+          onPress={() => quietly(updatePanel($, prev => ({ ...prev, isBandCollapsed: true })))}
+        />
+      </Box>
+    )
 
-    const done = run.filter(a => a.status !== 'running').length
+    // What the bar counts: Claude's own task list while the run has one, else its subagents.
+    const tasks = plan.runStartedAt === start && plan.tasks.length > 0 ? plan.tasks : undefined
+    const counts = tasks ? countsOf(tasks) : countsBefore(run, Infinity)
+    const { last, prev } = tasks ? { last: plan.last, prev: plan.prev } : stepsOf(run)
     const title = m.title ?? 'Working'
-    const percent = run.length > 0 ? Math.round(((isDone ? run.length : done) / run.length) * 100) : 0
-    const state = isDone ? 'done' : run.length > 0 ? `${done} of ${run.length} done, ${percent}%` : 'working'
-    // Working, the bar plays its latest step as it is drawn. Done, it stands full: the
-    // step that filled it played while the run worked, and is not played again.
-    const step = lastStep(run)
-    // The dot, title, bar, percent and crab are one drawing, so they share a middle line;
-    // the two buttons sit at the right end, the ▼ exactly where a folded band's ▲ is.
+    const percentOf = (c: Counts, done: boolean) => (c.total > 0 ? Math.round(((done ? c.total : c.done) / c.total) * 100) : 0)
+    const stateOf = (c: Counts, done: boolean) =>
+      done ? 'done' : c.total > 0 ? `${c.done} of ${c.total} done, ${percentOf(c, false)}%` : 'working'
+    if (!Svg) {
+      return (
+        <Box flexDirection="row" flexWrap="nowrap" justifyContent="space-between" alignItems="center" width="100%">
+          <Text>
+            {title} · {stateOf(counts, isDone)}
+          </Text>
+          {buttons}
+        </Box>
+      )
+    }
+
+    // The parts share the middle line: each drawing is the band's height with its words and
+    // shapes centred on it, and the percent's words are centred by the row.
     const rowW = Math.round(Math.max(260, Math.min(1108, (e.props.bodyColumns || 100) * 8 - 82)))
+    const layout = bandLayout(rowW, title)
+    // The step a drawing plays from: none once done, and none a turn begun since has
+    // already shown (a notification's turn after the run went Done).
+    const fromOf = (step: Step | undefined, isMainWorking: boolean) =>
+      step && isMainWorking && m.turnStartedAt > step.at ? undefined : step
+    const bar = (c: Counts, from: Step | undefined, at: number | undefined, done: boolean) => ({
+      source: bandBar({ width: layout.barW, ...c, isDone: done, from: done ? undefined : from, at: at ?? start }),
+      alt: `${title}: ${stateOf(c, done)}`,
+    })
+    const top = bar(counts, fromOf(last, m.isWorking), last?.at, isDone)
+
+    // A changed drawing loads in a new frame, blank until it paints. So for a moment after a
+    // change the band keeps what it showed before under the new drawing, whose opaque track
+    // covers it once painted: the bar before the latest step, before the run went Done, or
+    // before a turn began (still working, or Done), and the dot of before. Unchanged, the app
+    // keeps their frames as they are; a drawing that was not on show loads unseen beneath.
+    // Drawn after the moment, the band lets them go.
+    const now = await $.clock.now()
+    const isRecent = (at: number) => now - at < SETTLE_MS
+    const doneAt = Math.max(m.turnEndedAt ?? 0, last?.at ?? 0)
+    const wasMainWorking = (m.turnEndedAt ?? 0) >= (last?.at ?? 0)
+    const isFreshDone = isDone && isRecent(doneAt)
+    const hasTurnBegun = !isDone && m.isWorking && isRecent(m.turnStartedAt)
+    const before = [
+      ...(last && isRecent(last.at) ? [bar(last, fromOf(prev, m.isWorking), prev?.at, false)] : []),
+      ...(isFreshDone ? [bar(counts, fromOf(last, wasMainWorking), last?.at, false)] : []),
+      ...(hasTurnBegun ? [bar(counts, last, last?.at, false), bar(counts, undefined, last?.at, true)] : []),
+    ].filter((d, i, all) => d.source !== top.source && all.findIndex(o => o.source === d.source) === i)
+    const dots = [...(isFreshDone ? [false] : []), ...(hasTurnBegun ? [true] : []), isDone].map(done => ({
+      source: bandDot(done),
+      alt: done ? 'Done' : 'Working',
+    }))
+
+    // Drawings laid one over another, the last on top; the first holds the room.
+    const stack = (layers: { source: string; alt: string }[], width: number) => (
+      <Box flexDirection="row">
+        {layers.map((d, i) => (
+          <Box {...(i === 0 ? {} : { position: 'absolute' as const, top: 0, left: 0 })}>
+            <Svg source={d.source} alt={d.alt} width={width} height={BAND_H} isInteractive />
+          </Box>
+        ))}
+      </Box>
+    )
 
     return (
       <Box flexDirection="row" flexWrap="nowrap" justifyContent="space-between" alignItems="center" width="100%">
-        {Svg ? (
+        <Box flexDirection="row" flexWrap="nowrap" alignItems="center">
+          {stack(dots, layout.dotW)}
+          <Svg source={bandTitle(layout)} alt={title} width={layout.titleBoxW} height={BAND_H} isInteractive />
+          {stack([...before, top], layout.barW)}
+          <Box width={5} justifyContent="flex-end">
+            {counts.total > 0 && (
+              <Text dimColor size="caption" tabular>
+                {percentOf(counts, isDone)}%
+              </Text>
+            )}
+          </Box>
           <Svg
-            key={`band-${isDone ? 'done' : 'work'}`}
-            source={bandRow({
-              width: rowW,
-              title,
-              done,
-              total: run.length,
-              isDone,
-              from: isDone ? undefined : step,
-              at: step?.at ?? start,
-            })}
-            alt={`${title}: ${state}`}
-            width={rowW}
+            source={bandCrab(isDone)}
+            alt={isDone ? 'Claude crab, resting' : 'Claude crab, hopping'}
+            width={layout.crabW}
             height={BAND_H}
             isInteractive
           />
-        ) : (
-          <Text>
-            {title} · {state}
-          </Text>
-        )}
-        <Box flexDirection="row" alignItems="center" gap={1}>
-          <Button key="open-agents" plain label={`×${list.length}`} onPress={() => quietly(togglePane($))} />
-          <Button
-            key="band-toggle"
-            plain
-            label="▼"
-            onPress={() => quietly(updatePanel($, prev => ({ ...prev, isBandCollapsed: true })))}
-          />
         </Box>
+        {buttons}
       </Box>
     )
   })

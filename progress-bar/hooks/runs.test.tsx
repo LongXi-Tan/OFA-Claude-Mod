@@ -120,11 +120,22 @@ const endAgent = ($: Engine, id: string, reason: 'answer' | 'aborted' = 'answer'
     reason,
   })
 
-async function bandAlt($: Engine, isWorking: boolean) {
+// A bar's words: the title, then what the run has done.
+const BAR_ALT = /: (working|done|\d+ of \d+ done, \d+%)$/
+
+type Drawn = { alt: string; source: string }
+
+/** The band's drawings as a fresh mount draws them: its bars bottom to top, and the rest. */
+async function bandParts($: Engine, isWorking: boolean) {
   const ui = await $.ui.mount(band(isWorking))
-  const svg = await ui.find({ type: 'Svg' })
+  const drawn: Drawn[] = (await ui.findAll({ type: 'Svg' })).map(s => ({ alt: String(s.props.alt), source: String(s.props.source) }))
   await ui.unmount()
-  return svg === undefined ? undefined : String(svg.props.alt)
+  return { bars: drawn.filter(d => BAR_ALT.test(d.alt)), others: drawn.filter(d => !BAR_ALT.test(d.alt)) }
+}
+
+/** What the band says the run has done: the top bar's words. */
+async function bandAlt($: Engine, isWorking: boolean) {
+  return (await bandParts($, isWorking)).bars.at(-1)?.alt
 }
 
 /** What a drawing shows, in order: an Svg by its alt, a Text or a Button by its words. */
@@ -244,13 +255,80 @@ test('a finished agent woken again runs a second round', async ($, on) => {
   await ui.unmount()
 })
 
-/** The band's drawing, as a fresh mount draws it. */
+test('a turn that begins after Done keeps the Done bar and dot under the working ones, and replays nothing', async ($, on) => {
+  const { clock } = engine(on)
+  await start($)
+  await say($, 'polish the bar')
+  await clock.settle()
+  await mainTurn($, 't1')
+  await spawn($, 'a')
+  await clock.advance(1_000)
+  await endAgent($, 'a')
+  await clock.advance(1_000)
+  await endMain($, 't1')
+  await clock.advance(3_000)
+  const done = await bandParts($, false)
+  expect(done.bars.map(b => b.alt)).toEqual(['Polish the progress bar: done'])
+
+  // A background agent's notification starts a turn in the same run.
+  await say($, 'Agent "a" finished.', 'task-notification')
+  await mainTurn($, 't2')
+  const again = await bandParts($, true)
+  expect(again.bars).toContainEqual(done.bars[0])
+  expect(again.others).toContainEqual(done.others.find(d => d.alt === 'Done'))
+  const top = again.bars.at(-1)
+  expect(top?.alt).toBe('Polish the progress bar: 1 of 1 done, 100%')
+  // The step that filled the bar played before the Done; the new turn does not play it again.
+  expect(top?.source).not.toMatch(/class="(slide|fade|appear|grow[^"]*)"/)
+})
+
+/** The band's top bar, as a fresh mount draws it. */
 async function bandSource($: Engine, isWorking: boolean) {
-  const ui = await $.ui.mount(band(isWorking))
-  const svg = await ui.find({ type: 'Svg' })
-  await ui.unmount()
-  return String(svg?.props.source ?? '')
+  return (await bandParts($, isWorking)).bars.at(-1)?.source ?? ''
 }
+
+test('a step lays the new bar over the one on show, which stays until the new one has painted', async ($, on) => {
+  const { clock } = engine(on)
+  await start($)
+  await say($, 'polish the bar')
+  await clock.settle()
+  await mainTurn($, 't1')
+  await spawn($, 'a')
+  await clock.advance(1_000)
+  await spawn($, 'b')
+  await clock.advance(3_000)
+  const shown = await bandParts($, true)
+  expect(shown.bars).toHaveLength(1)
+
+  // The bar on show stays, the very same drawing, so the app keeps its frame: under the
+  // new bar, whose frame loads over it. Nothing else of the band changes.
+  await endAgent($, 'a')
+  const stepped = await bandParts($, true)
+  expect(stepped.bars).toHaveLength(2)
+  expect(stepped.bars[0]).toEqual(shown.bars[0])
+  expect(stepped.bars[1]?.alt).toBe('Polish the progress bar: 1 of 2 done, 50%')
+  expect(stepped.others).toEqual(shown.others)
+  // Two steps close together: the second keeps the first's new bar, not the one before.
+  await clock.advance(500)
+  await endAgent($, 'b')
+  const again = await bandParts($, true)
+  expect(again.bars).toEqual([stepped.bars[1], again.bars[1]])
+  expect(again.bars[1]?.alt).toBe('Polish the progress bar: 2 of 2 done, 100%')
+
+  // Drawn once the new bar has long painted, the band lets the old one go.
+  await clock.advance(3_000)
+  const settled = await bandParts($, true)
+  expect(settled.bars).toEqual([again.bars[1]])
+
+  // Done: the working bar and dot stay under the Done ones until those have painted.
+  await endMain($, 't1')
+  const done = await bandParts($, false)
+  expect(done.bars).toEqual([settled.bars[0], done.bars[1]])
+  expect(done.bars[1]?.alt).toBe('Polish the progress bar: done')
+  const dots = done.others.filter(d => d.alt === 'Working' || d.alt === 'Done')
+  expect(dots.map(d => d.alt)).toEqual(['Working', 'Done'])
+  expect(dots[0]).toEqual(settled.others.find(d => d.alt === 'Working'))
+})
 
 test('the bar plays each step from the counts before it: an end forward, a wake back, Done not again', async ($, on) => {
   const { clock } = engine(on)
@@ -284,6 +362,108 @@ test('the bar plays each step from the counts before it: an end forward, a wake 
   const done = await bandSource($, false)
   expect(done).toMatch(/breathe-done/)
   expect(done, 'Done').not.toMatch(/class="(slide|fade|appear|grow[^"]*|tick gone)"/)
+})
+
+const task = (content: string, status: 'pending' | 'in_progress' | 'completed') => ({ content, status })
+
+test('while the run has a task list of Claude\'s own, the band counts its tasks', async ($, on) => {
+  const { clock } = engine(on)
+  on('tool.call', () => ({ result: 'ok' }))
+  await start($)
+  await say($, 'polish the bar')
+  await clock.settle()
+  await mainTurn($, 't1')
+  await $.tool.call({
+    tool: 'mcp__ccd_turn__update_plan',
+    scope: 'first_task',
+    items: [task('Look', 'in_progress'), task('Fix', 'pending'), task('Test', 'pending'), task('Ship', 'pending')],
+  })
+  expect(await bandAlt($, true)).toBe('Polish the progress bar: 0 of 4 done, 0%')
+
+  await clock.advance(1_000)
+  await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', advance: true })
+  expect(await bandAlt($, true)).toBe('Polish the progress bar: 1 of 4 done, 25%')
+  expect(await bandSource($, true), 'a task done fills the bar').toMatch(/<g class="slide" style="--from:-\d+px">/)
+
+  // A subagent shows in the pane and on ×N, not on the bar; its own list is its own.
+  await spawn($, 'a')
+  await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', items: [task('Mine', 'completed')], agentId: 'agent-a' })
+  await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', done: [2, 3], start: 4 })
+  expect(await bandAlt($, true)).toBe('Polish the progress bar: 3 of 4 done, 75%')
+
+  // The wrap-up checks the rest off; the run ends Done.
+  await $.tool.call({ tool: 'mcp__ccd_turn__wrap_up', recap: 'All four done.' })
+  expect(await bandAlt($, true)).toBe('Polish the progress bar: 4 of 4 done, 100%')
+  await endAgent($, 'a')
+  await endMain($, 't1')
+  expect(await bandAlt($, false)).toBe('Polish the progress bar: done')
+
+  // The next run counts from nothing: no list of its own yet, and no subagents.
+  await clock.advance(1_000)
+  await say($, 'now the readme')
+  await clock.settle()
+  await mainTurn($, 't2')
+  expect(await bandAlt($, true)).toBe('Polish the progress bar: working')
+})
+
+test('the terminal\'s todo list and task tools count the same way', async ($, on) => {
+  const { clock } = engine(on)
+  let made = 0
+  on('tool.call', (_, e) => ({
+    result: e.tool === 'TaskCreate' ? { task: { id: String(++made), subject: String(e.subject) } } : 'ok',
+  }))
+  await start($)
+  await say($, 'polish the bar')
+  await clock.settle()
+  await mainTurn($, 't1')
+  await $.tool.call({
+    tool: 'TodoWrite',
+    todos: [
+      { content: 'Read', status: 'completed', activeForm: 'Reading' },
+      { content: 'Write', status: 'in_progress', activeForm: 'Writing' },
+    ],
+  })
+  expect(await bandAlt($, true)).toBe('Polish the progress bar: 1 of 2 done, 50%')
+
+  await $.tool.call({ tool: 'TaskCreate', subject: 'Check', description: 'Check it' })
+  expect(await bandAlt($, true)).toBe('Polish the progress bar: 1 of 3 done, 33%')
+  await $.tool.call({ tool: 'TaskUpdate', taskId: '1', status: 'completed' })
+  expect(await bandAlt($, true)).toBe('Polish the progress bar: 2 of 3 done, 67%')
+})
+
+test('a subagent\'s line in the pane names its model, effort and bg alone', async ($, on) => {
+  engine(on)
+  await start($)
+  await spawn($, 'a', 'Scout the repo')
+  const ui = await $.ui.mount(PANE)
+  expect(await ui.find({ type: 'Text', text: /^Opus 5\.5$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Explore|Wizard/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('as a turn ends the main crab folds its laptop away, and a pane drawn later shows it dozing', async ($, on) => {
+  const { clock } = engine(on)
+  await start($)
+  await say($, 'polish the bar')
+  await clock.settle()
+  await mainTurn($, 't1')
+  const crab = async () => {
+    const ui = await $.ui.mount(PANE)
+    const svg = await ui.find({ type: 'Svg' })
+    await ui.unmount()
+    return { alt: String(svg?.props.alt), source: String(svg?.props.source) }
+  }
+  expect((await crab()).source, 'working').toMatch(/repeatCount="indefinite"/)
+
+  await endMain($, 't1')
+  const closing = await crab()
+  expect(closing.alt).toMatch(/dozing/)
+  expect(closing.source, 'as it ends').toMatch(/<set attributeName="visibility" to="visible" begin="0\.700s" fill="freeze"\/>/)
+
+  await clock.advance(5_000)
+  const later = (await crab()).source
+  expect(later, 'later').not.toContain('<animate')
+  expect(later).toContain('class="zz"')
 })
 
 test('an interrupted agent shows as stopped, not failed', async ($, on) => {
@@ -365,9 +545,8 @@ test('▼ collapses the band to only ▲, and ▲ brings the full band back', as
   for (const surface of SURFACES) {
     const ui = await $.ui.mount(band(true, surface))
     const full = await shows(ui)
-    expect(full).toHaveLength(3)
-    expect(full[0]).toMatch(/^Polish the progress bar(:| ·) 0 of 1 done, 0%$/)
-    expect(full.slice(1)).toEqual(['×1', '▼'])
+    expect(full.some(s => /^Polish the progress bar(:| ·) 0 of 1 done, 0%$/.test(s)), full.join(' | ')).toBe(true)
+    expect(full.slice(-2)).toEqual(['×1', '▼'])
 
     await ui.press({ key: 'band-toggle' })
     expect(await shows(ui)).toEqual(['▲'])
@@ -395,8 +574,10 @@ test('a collapsed band stays collapsed into the next run', { options: { workTitl
   await mainTurn($, 't2')
   const next = await $.ui.mount(band(true))
   expect(await shows(next)).toEqual(['▲'])
+  // Opened once the turn's first moment has passed: the band as it settles.
+  await clock.advance(3_000)
   await next.press({ key: 'band-toggle' })
-  expect(await shows(next)).toEqual(['Write the readme: working', '×0', '▼'])
+  expect(await shows(next)).toEqual(['Working', 'Write the readme', 'Write the readme: working', 'Claude crab, hopping', '×0', '▼'])
   await next.unmount()
 })
 

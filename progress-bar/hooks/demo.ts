@@ -19,6 +19,7 @@ const quietly = (work: Promise<unknown>) => void work.catch(() => undefined)
  * demo gone and stands down rather than adding a row after the sweep.
  */
 export async function clearDemo($: EngineInterface) {
+  const at = await $.clock.now()
   await updateMain($, m => {
     if (m.title !== DEMO_TITLE) return m
     const back = m.beforeDemo
@@ -31,6 +32,8 @@ export async function clearDemo($: EngineInterface) {
       runStartedAt: back?.runStartedAt,
       isWorking: isRealTurn,
       turnStartedAt: isRealTurn ? m.turnStartedAt : (back?.turnStartedAt ?? 0),
+      // A demo stopped mid-play ends the crab's work: it folds its laptop away.
+      turnEndedAt: m.isWorking && !isRealTurn ? at : m.turnEndedAt,
     }
   })
   await updateAgents($, list => list.filter(a => !a.isDemo))
@@ -136,6 +139,11 @@ export async function runDemo($: EngineInterface) {
 
   $.clock.after(DEMO_MS, () => {
     tick.cancel()
-    quietly(updateMain($, m => (m.demoId === start ? { ...m, isWorking: false, demoId: undefined } : m)))
+    quietly(
+      (async () => {
+        const at = await $.clock.now()
+        await updateMain($, m => (m.demoId === start ? { ...m, isWorking: false, demoId: undefined, turnEndedAt: at } : m))
+      })(),
+    )
   })
 }

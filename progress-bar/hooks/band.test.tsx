@@ -1,4 +1,11 @@
 import { expect, mock, test } from 'claude-code/testing'
+import type { Mounted } from 'claude-code/testing'
+
+/** The band's bar on top, the one the run's words are on: the last drawing that says what is done. */
+async function topBar(ui: Pick<Mounted, 'findAll'>) {
+  const svgs = await ui.findAll({ type: 'Svg' })
+  return svgs.filter(s => /: (working|done|\d+ of \d+ done, \d+%)$/.test(String(s.props.alt))).at(-1)
+}
 
 const BAND = {
   plugin: 'progress-bar',
@@ -33,8 +40,7 @@ test('the demo moves the band one step per finished task, then turns it Done', a
   const ui = await $.ui.mount(BAND)
   const seen: string[] = []
   for (let s = 0; s <= 24; s++) {
-    const band = await ui.find({ type: 'Svg' })
-    const label = String(band?.props.alt ?? '')
+    const label = String((await topBar(ui))?.props.alt ?? '')
     if (seen.at(-1) !== label) seen.push(label)
     await clock.advance(1_000)
   }
@@ -64,7 +70,7 @@ test('the band draws the pill one size in every state, and dots across the full 
   })
   const drawn = async () => {
     const ui = await $.ui.mount(BAND)
-    const source = String((await ui.find({ type: 'Svg' }))?.props.source ?? '')
+    const source = String((await topBar(ui))?.props.source ?? '')
     await ui.unmount()
     return source
   }
@@ -81,6 +87,8 @@ test('the band draws the pill one size in every state, and dots across the full 
   expect(working).toMatch(pill('breathe', '#8B7CF6'))
   expect(done).toMatch(pill('breathe-done', '#5BBF8A'))
   expect(working).not.toMatch(/glint|polygon/)
+  // Nor any white highlight on it: the pill is its colour alone.
+  for (const source of [working, done]) expect(source).not.toMatch(/<rect[^>]*fill="#FFFFFF"/)
   // Dots from the bar's top row to its bottom one.
   for (const source of [working, done]) {
     expect(source).toMatch(/M\d+ 0h2v2h-2z/)

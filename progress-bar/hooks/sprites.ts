@@ -180,9 +180,10 @@ const MAIN_BODY = { x: SCENE_BODY.x + 9, y: SCENE_BODY.y + 1 }
 /**
  * The main session's crab, 52x24 units, drawn from the band's recorded scene. Working: it
  * pulls the laptop down and turns to it once, then types on it for as long as the turn
- * runs. Idle: it stands as the scene leaves it, eyes shut, dozing.
+ * runs. Idle: it stands as the scene leaves it, eyes shut, dozing; `isClosing`, as a turn
+ * ends, it first plays the scene's close, folding the laptop away and settling, then dozes.
  */
-export const mainSprite = (isWorking: boolean): string => {
+export const mainSprite = (isWorking: boolean, isClosing = false): string => {
   const { x: ox, y: oy } = MAIN_BODY
 
   if (!isWorking) {
@@ -190,7 +191,17 @@ export const mainSprite = (isWorking: boolean): string => {
     const rows = SCENE_POSES[0]!.map((row, y) => (y === SCENE_BODY.y + 2 ? row.replace(/E/g, 'O') : row))
     const z = (cls: string) =>
       `<text x="44" y="8" font-size="6" font-family="monospace" fill="#9AA3AD" class="${cls}">z</text>`
-    return svg(52, 24, MAIN_CSS, posePaths(rows, ox, oy) + z('zz') + z('zz d'))
+    const dozing = posePaths(rows, ox, oy) + z('zz') + z('zz d')
+    if (!isClosing) return svg(52, 24, MAIN_CSS, dozing)
+    const close = SCENE_SEQUENCE.slice(SCENE_TYPING[1])
+    const closeS = (framesOf(close) / SCENE_FPS).toFixed(3)
+    return svg(
+      52,
+      24,
+      MAIN_CSS,
+      scenePoses(close, ox, oy, `begin="0s" dur="${closeS}s"`) +
+        `<g visibility="hidden"><set attributeName="visibility" to="visible" begin="${closeS}s" fill="freeze"/>${dozing}</g>`,
+    )
   }
 
   const intro = SCENE_SEQUENCE.slice(0, SCENE_TYPING[0])
@@ -306,11 +317,14 @@ const LEVELS = [0.55, 1]
 // The shimmer: working, a quick sweep and a rest; done, a slower, softer one.
 const SWEEP = { work: { cycle: 2.4, cross: 1.3 }, done: { cycle: 3.6, cross: 2.2 } }
 
+const TITLE_CSS = `.fg{fill:#ECECEC}@media (prefers-color-scheme: light){.fg{fill:#1F1F1E}}`
+const DOT_CSS = `.pulse{animation:pulse 1.6s ease-in-out infinite}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}`
+
+// The track is opaque, its colour what the earlier see-through one came to over the band:
+// a bar drawn over another covers it whole the moment it paints.
 const BAND_CSS = `
-.fg{fill:#ECECEC}.dim{fill:#9A9A9A}.track{fill:#FFFFFF;fill-opacity:.07}.tick{fill:#FFFFFF;fill-opacity:.3}
-@media (prefers-color-scheme: light){.fg{fill:#1F1F1E}.dim{fill:#6B6B6B}.track{fill:#000000;fill-opacity:.06}.tick{fill:#000000;fill-opacity:.25}}
-.pulse{animation:pulse 1.6s ease-in-out infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.track{fill:#343434}.tick{fill:#FFFFFF;fill-opacity:.3}
+@media (prefers-color-scheme: light){.track{fill:#EFEFEF}.tick{fill:#000000;fill-opacity:.25}}
 .w{animation:wave ${SWEEP.work.cycle}s linear infinite;opacity:.4}
 @keyframes wave{0%{opacity:.4}6%{opacity:1}18%{opacity:.7}36%,100%{opacity:.4}}
 .wd{animation:wave-done ${SWEEP.done.cycle}s ease-in-out infinite;opacity:.6}
@@ -344,7 +358,7 @@ ${Array.from({ length: GROWS }, (_, g) => `.g${g}{animation-delay:${(whenAt(g / 
 const phaseCss = (at: number) => {
   const behind = (cycle: number, delay = 0) => `animation-delay:${(delay - ((at / 1000) % cycle)).toFixed(3)}s`
   return [
-    `.pulse{${behind(1.6)}}.breathe{${behind(2.4)}}.breathe-done{${behind(3.6)}}`,
+    `.breathe{${behind(2.4)}}.breathe-done{${behind(3.6)}}`,
     ...Array.from({ length: WAVES }, (_, k) => `.k${k}{${behind(SWEEP.work.cycle, (k * SWEEP.work.cross) / WAVES)}}`),
     ...Array.from({ length: WAVES }, (_, k) => `.j${k}{${behind(SWEEP.done.cycle, (k * SWEEP.done.cross) / WAVES)}}`),
     ...Array.from({ length: SPARKS }, (_, s) => `.s${s}{${behind(2.8, -(s * 2.8) / SPARKS)}}`),
@@ -376,7 +390,7 @@ const dotAt = (x: number, y: number, length: number, look: Look) => {
  * The bar, `W` x 20 at the origin. A trail of pixel dots runs from the start to the pill,
  * full height inside the rounded track: denser and lighter toward the pill, a shimmer
  * sweeping it from the start, a few dots twinkling white. The pill sits at its head, one
- * size in every state, glossy, its colour breathing; a tick marks each step to come. Done,
+ * size in every state, its colour breathing; a tick marks each step to come. Done,
  * the whole bar turns green and keeps shimmering, slower and softer.
  *
  * `from`, the fraction the bar stood at before the latest step: the drawing opens on the
@@ -450,10 +464,7 @@ const barMarkup = (W: number, done: number, total: number, isDone: boolean, from
     }
   }
 
-  const pill =
-    `<rect class="${isDone ? 'breathe-done' : 'breathe'}" x="${pillX}" y="0" width="${PILL_W}" height="${H}" rx="${R}" fill="${isDone ? '#5BBF8A' : '#8B7CF6'}"/>` +
-    // A soft gloss along its top.
-    `<rect x="${pillX + 5}" y="2" width="${PILL_W - 10}" height="5" rx="2.5" fill="#FFFFFF" fill-opacity=".16"/>`
+  const pill = `<rect class="${isDone ? 'breathe-done' : 'breathe'}" x="${pillX}" y="0" width="${PILL_W}" height="${H}" rx="${R}" fill="${isDone ? '#5BBF8A' : '#8B7CF6'}"/>`
 
   const mid = pillX + PILL_W / 2
   const label = isDone ? 'Done' : total > 0 ? `${done}/${total}` : '' // nothing counted yet: three dots that breathe
@@ -541,34 +552,70 @@ const scenePoses = (seq: Seq, ox: number, oy: number, timing: string) => {
   }).join('')
 }
 
-/**
- * The band's crab in a box 44 wide and the band's height, its body at x 22 on the middle
- * line: hopping, or resting once done. A click plays the recorded scene in its place, one
- * pose at a time on the recording's own timing: it pulls a laptop down from above, sets it
- * on the ground at its left, types, then folds it away and settles back where it stood.
- * A clear rect over the crab takes the click.
- */
-const bandCrab = (isDone: boolean) => {
-  const ox = SCENE_W + 6
-  const oy = MID - 8
-  const mood: CrabMood = isDone ? 'done' : 'working'
-  const isHopping = !isDone
-  const crabNow =
-    `<g class="${isHopping ? 'walk' : 'still'}"><set attributeName="visibility" to="hidden" ${SCENE}/>` +
-    `${crab(ox, oy, BODY, moodEyes(mood, 'open'), isHopping)}</g>`
-  const scene = scenePoses(SCENE_SEQUENCE, ox, oy, SCENE)
-  const hit =
-    `<rect id="crab" x="${ox - 4}" y="0" width="24" height="${BAND_H}" fill="#000000" fill-opacity="0" ` +
-    `pointer-events="all" style="cursor:pointer"><title>Click: Claude pulls out a laptop and types</title></rect>`
-  return crabNow + scene + hit
+// ---- The band's parts -------------------------------------------------------------
+//
+// The band is drawn in parts, each its own frame, because a frame whose drawing changes
+// is torn down and loaded afresh, blank until it paints. A task step changes the bar
+// alone: the band lays the new bar over the old, which stays until the new one covers
+// it, and the percent is the band's own words, which change in place. The dot, title and
+// crab change only as a run begins, is named, or ends.
+
+const FONT = `font-family="system-ui,'Segoe UI',sans-serif"`
+const DOT_W = 18 // the dot's box: the dot, then the room before the title
+
+/** A part of the band: an SVG document `width` x BAND_H. */
+const part = (width: number, css: string, body: string, extra = '') =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${BAND_H}" width="${width}" height="${BAND_H}"${extra}>` +
+  `<style>${css}</style>${body}</svg>`
+
+/** Where the band's parts sit across `width` CSS pixels, left to right, in CSS pixels. */
+export type BandLayout = {
+  /** The title as drawn, cut to fit, and how wide it runs. */
+  title: string
+  titleW: number
+  dotW: number
+  /** The title's box: the title, then the room before the bar. */
+  titleBoxW: number
+  barW: number
+  /** The room the percent's words have, between the bar and the crab. */
+  percentW: number
+  /** The crab's box, the room its click scene reaches into included. */
+  crabW: number
 }
 
-export type BandRow = {
+export const bandLayout = (width: number, title: string): BandLayout => {
+  const W = Math.max(220, Math.round(width))
+  const crabW = SCENE_W + CRAB_W
+  const percentW = PERCENT_W + PERCENT_GAP
+  const barRight = W - crabW - percentW
+  const titleMax = Math.max(40, Math.min(340, W * 0.38, barRight - 32 - 90))
+  const fitted = fitText(title, titleMax)
+  const titleW = Math.min(titleMax, Math.round(textWidth(fitted) * 100) / 100)
+  const barX = Math.ceil(DOT_W + titleW + 14)
+  return { title: fitted, titleW, dotW: DOT_W, titleBoxW: barX - DOT_W, barW: Math.max(PILL_W + 20, barRight - barX), percentW, crabW }
+}
+
+/** The dot at the band's left: purple and pulsing while working, green once done. */
+export const bandDot = (isDone: boolean): string =>
+  part(DOT_W, DOT_CSS, `<circle${isDone ? '' : ' class="pulse"'} cx="6" cy="${MID}" r="4" fill="${isDone ? '#5BBF8A' : '#8B7CF6'}"/>`)
+
+/**
+ * The run's title, on the middle line with `dominant-baseline="central"`. `textLength`
+ * holds it to the width it was given, so a font wider than Segoe UI (another machine's
+ * system-ui) still never runs into the bar.
+ */
+export const bandTitle = (layout: BandLayout): string =>
+  part(
+    layout.titleBoxW,
+    TITLE_CSS,
+    `<text class="fg" x="0" y="${MID}" dominant-baseline="central" font-size="13" font-weight="600" textLength="${layout.titleW}" lengthAdjust="spacingAndGlyphs">${esc(layout.title)}</text>`,
+    ` ${FONT}`,
+  )
+
+export type BandBar = {
   /** CSS pixels across. */
   width: number
-  /** The run's work title; cut to fit. */
-  title: string
-  /** This run's subagents: how many have ended, and how many there are. */
+  /** What the run counts: how many are done, and how many there are. */
   done: number
   total: number
   isDone: boolean
@@ -581,39 +628,37 @@ export type BandRow = {
   at?: number
 }
 
-/**
- * The whole band but its buttons, `width` x BAND_H CSS pixels, as one drawing so the dot,
- * title, bar, percent and crab share one middle line: every text sits on it with
- * `dominant-baseline="central"`, and the bar and crab are centred on it. The crab's box
- * keeps clear of the percent, so its click scene never covers it.
- */
-export const bandRow = (b: BandRow): string => {
-  const W = Math.max(220, Math.round(b.width))
-  const FONT = `font-family="system-ui,'Segoe UI',sans-serif"`
-  const crabBox = W - SCENE_W - CRAB_W
-  const percentRight = crabBox - PERCENT_GAP
-  const barRight = percentRight - PERCENT_W
-  const titleMax = Math.max(40, Math.min(340, W * 0.38, barRight - 32 - 90))
-  const title = fitText(b.title, titleMax)
-  const titleW = Math.min(titleMax, Math.round(textWidth(title) * 100) / 100)
-  const barX = Math.ceil(18 + titleW + 14)
-  const barW = Math.max(PILL_W + 20, barRight - barX)
-  const fraction = b.isDone ? 1 : b.total > 0 ? b.done / b.total : 0
+/** The bar on the band's middle line, its track opaque: drawn over an earlier bar, it covers it whole. */
+export const bandBar = (b: BandBar): string => {
+  const W = Math.max(PILL_W + 20, Math.round(b.width))
   const from = b.from && (b.from.total > 0 ? b.from.done / b.from.total : 0)
-
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${BAND_H}" width="${W}" height="${BAND_H}" ${FONT}>` +
-    `<style>${BAND_CSS}${BASE_CSS}${phaseCss(b.at ?? 0)}</style>` +
-    `<circle${b.isDone ? '' : ' class="pulse"'} cx="6" cy="${MID}" r="4" fill="${b.isDone ? '#5BBF8A' : '#8B7CF6'}"/>` +
-    // `textLength` holds the title to the width it was given, so a font wider than
-    // Segoe UI (another machine's system-ui) still never runs into the bar.
-    `<text class="fg" x="18" y="${MID}" dominant-baseline="central" font-size="13" font-weight="600" textLength="${titleW}" lengthAdjust="spacingAndGlyphs">${esc(title)}</text>` +
-    `<g transform="translate(${barX} ${MID - R})">${barMarkup(barW, b.done, b.total, b.isDone, from)}</g>` +
-    (b.total > 0
-      ? `<text class="dim" x="${percentRight}" y="${MID}" dominant-baseline="central" text-anchor="end" font-size="12">${Math.round(fraction * 100)}%</text>`
-      : '') +
-    `<svg x="${crabBox}" y="0" width="${SCENE_W + CRAB_W}" height="${BAND_H}" viewBox="0 0 ${SCENE_W + CRAB_W} ${BAND_H}" shape-rendering="crispEdges">` +
-    `${bandCrab(b.isDone)}</svg>` +
-    `</svg>`
+  return part(
+    W,
+    BAND_CSS + phaseCss(b.at ?? 0),
+    `<g transform="translate(0 ${MID - R})">${barMarkup(W, b.done, b.total, b.isDone, from)}</g>`,
+    ` ${FONT}`,
   )
+}
+
+/**
+ * The band's crab in a box 44 wide, its body at x 22 on the middle line: hopping, or
+ * resting once done. A click plays the recorded scene in its place, one pose at a time on
+ * the recording's own timing: it pulls a laptop down from above, sets it on the ground at
+ * its left, types, then folds it away and settles back where it stood. A clear rect over
+ * the crab takes the click; the box's left 16 are the room the scene reaches into, so it
+ * keeps clear of the percent.
+ */
+export const bandCrab = (isDone: boolean): string => {
+  const ox = SCENE_W + 6
+  const oy = MID - 8
+  const mood: CrabMood = isDone ? 'done' : 'working'
+  const isHopping = !isDone
+  const crabNow =
+    `<g class="${isHopping ? 'walk' : 'still'}"><set attributeName="visibility" to="hidden" ${SCENE}/>` +
+    `${crab(ox, oy, BODY, moodEyes(mood, 'open'), isHopping)}</g>`
+  const scene = scenePoses(SCENE_SEQUENCE, ox, oy, SCENE)
+  const hit =
+    `<rect id="crab" x="${ox - 4}" y="0" width="24" height="${BAND_H}" fill="#000000" fill-opacity="0" ` +
+    `pointer-events="all" style="cursor:pointer"><title>Click: Claude pulls out a laptop and types</title></rect>`
+  return part(SCENE_W + CRAB_W, BASE_CSS, crabNow + scene + hit, ' shape-rendering="crispEdges"')
 }

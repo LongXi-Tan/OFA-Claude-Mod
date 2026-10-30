@@ -47,10 +47,31 @@ export type MainState = {
   runStartedAt?: number
   /** The run's work title, named from the prompt that began it; unset while it is being named. */
   title?: string
+  /** When the main session's last turn ended: its crab folds its laptop away then, before it dozes. */
+  turnEndedAt?: number
   /** The `runStartedAt` of a demo still playing; a real run clears it. */
   demoId?: number
   /** The run a demo took the band from, which `/progress-bar clear` puts back. */
   beforeDemo?: { runStartedAt?: number; turnStartedAt: number; title?: string }
+}
+
+/** One task of Claude's own task list. */
+export type PlanTask = {
+  /** The id a task tool gave it, which later updates name it by. */
+  id?: string
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
+}
+
+/** Claude's own task list in the main session, which the band counts while the run has one. */
+export type PlanState = {
+  /** The run the list was last written in: the band counts it for that run alone. */
+  runStartedAt?: number
+  tasks: PlanTask[]
+  /** The list's latest move forward or back: when, and the counts just before it. */
+  last?: { at: number; done: number; total: number }
+  /** The move before it, which the band drew until the latest came. */
+  prev?: { at: number; done: number; total: number }
 }
 
 export type PanelState = {
@@ -66,6 +87,7 @@ declare module 'claude-code' {
     'progress-bar': {
       agents: Shaped<AgentRow[]>
       main: Shaped<MainState>
+      plan: Shaped<PlanState>
       now: number
       panel: PanelState
     }

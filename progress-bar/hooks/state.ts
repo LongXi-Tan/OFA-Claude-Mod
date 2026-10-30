@@ -5,18 +5,20 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { AgentRow, MainState, PanelState } from '../types'
+import type { AgentRow, MainState, PanelState, PlanState } from '../types'
 
 export const PANE = 'progress-bar'
 /** Rows kept; the oldest drop off past it. */
 export const KEEP = 60
 
 export const EMPTY_MAIN: MainState = { isWorking: false, turnStartedAt: 0, workMs: 0, tokens: 0, costUsd: 0, model: '' }
+export const EMPTY_PLAN: PlanState = { tasks: [] }
 
 // Change a tag when that value's fields change: it declines what an earlier
 // version stored, which outlives a reload. Fields added as optional keep the tag.
 const agents = atom({ plugin: 'progress-bar', key: 'agents' } as const, [] as AgentRow[], { shape: 'agents-1' })
 const main = atom({ plugin: 'progress-bar', key: 'main' } as const, EMPTY_MAIN, { shape: 'main-1' })
+const plan = atom({ plugin: 'progress-bar', key: 'plan' } as const, EMPTY_PLAN, { shape: 'plan-1' })
 const now = atom({ plugin: 'progress-bar', key: 'now' } as const, 0)
 const panel = atom({ plugin: 'progress-bar', key: 'panel' } as const, { isDoneCollapsed: false } as PanelState)
 
@@ -26,6 +28,9 @@ export function readAgents($: EngineInterface) {
 }
 export function readMain($: EngineInterface) {
   return read($, main)
+}
+export function readPlan($: EngineInterface) {
+  return read($, plan)
 }
 export function readPanel($: EngineInterface) {
   return read($, panel)
@@ -40,6 +45,9 @@ export function updateAgents($: EngineInterface, fn: (rows: AgentRow[]) => Agent
 }
 export function updateMain($: EngineInterface, fn: (m: MainState) => MainState) {
   return update($, main, fn)
+}
+export function updatePlan($: EngineInterface, fn: (p: PlanState) => PlanState) {
+  return update($, plan, fn)
 }
 export function updatePanel($: EngineInterface, fn: (p: PanelState) => PanelState) {
   return update($, panel, fn)
