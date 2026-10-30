@@ -10,9 +10,9 @@ import type {
 } from 'claude-code'
 
 import type { AgentRow, AgentStatus } from '../types'
-import { DEMO_MS, runDemo } from './demo'
+import { DEMO_MS, DEMO_TITLE, clearDemo, runDemo } from './demo'
 import { costOf, fmtCost, fmtTime, fmtTokens, modelName, tokensOf, windowOf } from './model'
-import { DESIGNS, agentSprite, bandRow, barSprite, mainSprite } from './sprites'
+import { BAND_H, DESIGNS, agentSprite, bandRow, barSprite, mainSprite } from './sprites'
 import type { CrabMood } from './sprites'
 import {
   EMPTY_MAIN,
@@ -21,9 +21,11 @@ import {
   readAgents,
   readMain,
   readNow,
+  isPending,
   readPanel,
   runStart,
   setNow,
+  togglePane,
   updateAgents,
   updateMain,
   updatePanel,
@@ -35,6 +37,8 @@ import { nameRun } from './title'
 const PERSON = new Set(['composer', 'sdk', 'bridge'])
 // Finished rows the pane draws until the person asks for all of them.
 const FINISHED_SHOWN = 8
+// How long a run may wait for its first turn before the band stops calling it working.
+const PENDING_MS = 30_000
 // How the engine's agent list names an agent that is no longer running.
 const SETTLED: Partial<Record<EngineAgentStatus, AgentStatus>> = {
   completed: 'done',
@@ -44,6 +48,9 @@ const SETTLED: Partial<Record<EngineAgentStatus, AgentStatus>> = {
 const MARK: Record<AgentStatus, string> = { running: '', done: '✓ ', failed: '✗ ', stopped: '■ ' }
 
 const moodOf = (s: AgentStatus): CrabMood => (s === 'running' ? 'working' : s)
+// Work started and not awaited (a press, a pane opened on the side): another plugin's
+// refusal ends it quietly, never as a rejection nothing handles.
+const quietly = (work: Promise<unknown>) => void work.catch(() => undefined)
 const elapsedOf = (a: AgentRow, at: number) => (a.endedAt ?? Math.max(at, a.startedAt)) - a.startedAt
 
 // Module memory, which a reload empties: agents the engine's list has shown, and the
@@ -51,21 +58,54 @@ const elapsedOf = (a: AgentRow, at: number) => (a.endedAt ?? Math.max(at, a.star
 const listed = new Set<string>()
 const endedEarly = new Map<string, AgentStatus>()
 
-/** The person's prompt begins a new run when nothing is working; one sent mid-run joins it. */
-async function beginRun($: EngineInterface, e: PromptSubmitInput, useModel: boolean) {
-  if (e.isMeta || e.command !== undefined || !PERSON.has(e.origin.kind) || e.text.trim() === '') return
+/** A run begun by a prompt the engine has not yet taken, and what it replaced. */
+type Begun = {
+  at: number
+  text: string
+  before: { runStartedAt?: number; title?: string }
+  /** The title of the work before, which a follow-up keeps. */
+  previousTitle?: string
+}
+
+/**
+ * The person's prompt begins a new run when nothing is working; one sent mid-run, or before
+ * the run's first turn, joins it. The run starts at once, so the band shows it as the prompt
+ * goes in; `settleRun` keeps or undoes it once the engine says whether the prompt entered.
+ */
+async function beginRun($: EngineInterface, e: PromptSubmitInput): Promise<Begun | undefined> {
+  if (e.isMeta || e.command !== undefined || !PERSON.has(e.origin.kind) || e.text.trim() === '') return undefined
   const [list, m] = await Promise.all([readAgents($), readMain($)])
-  const isBusy = (m.isWorking && m.demoId === undefined) || list.some(a => a.status === 'running' && !a.isDemo)
-  if (isBusy) return
+  const isBusy =
+    (m.isWorking && m.demoId === undefined) || isPending(m) || list.some(a => a.status === 'running' && !a.isDemo)
+  if (isBusy) return undefined
 
   const at = await $.clock.now()
-  const previous = m.demoId === undefined ? m.title : undefined
-  await updateMain($, prev => ({ ...prev, runStartedAt: at, demoId: undefined, title: undefined }))
+  await updateMain($, prev => ({ ...prev, runStartedAt: at, title: undefined }))
+  return {
+    at,
+    text: e.text,
+    before: { runStartedAt: m.runStartedAt, title: m.title },
+    previousTitle: m.demoId === undefined && m.title !== DEMO_TITLE ? m.title : undefined,
+  }
+}
+
+/**
+ * Once the engine has the prompt. Dropped (a hook refused it), the run it began is undone and
+ * the band shows the run before. Entered, the run stands: a demo it interrupted ends, and the
+ * work is named off this dispatch, so the prompt never waits on the model.
+ */
+async function settleRun($: EngineInterface, begun: Begun, isDropped: boolean, useModel: boolean) {
+  if (isDropped) {
+    await updateMain($, m => (m.runStartedAt === begun.at ? { ...m, ...begun.before } : m))
+    return
+  }
+  await updateMain($, m =>
+    m.runStartedAt === begun.at
+      ? { ...m, demoId: undefined, beforeDemo: undefined, isWorking: m.demoId === undefined ? m.isWorking : false }
+      : m,
+  )
   await updateAgents($, rows => rows.filter(a => !a.isDemo))
-  await updatePanel($, p => ({ ...p, hiddenRun: undefined }))
-  // Named off this dispatch, so the prompt never waits on the model.
-  const text = e.text
-  $.clock.after(0, () => void nameRun($, text, at, previous, useModel).catch(() => undefined))
+  $.clock.after(0, () => void nameRun($, begun.text, begun.at, begun.previousTitle, useModel).catch(() => undefined))
 }
 
 async function startTurn($: EngineInterface, agentId: string | undefined) {
@@ -108,7 +148,7 @@ async function addAgent($: EngineInterface, e: AgentSpawnInput, model: string, a
   }
   await updateAgents($, prev => [...prev.filter(a => a.id !== row.id), row].slice(-KEEP))
   await setNow($, at)
-  if (autoOpen && !list.some(a => a.status === 'running' && !a.isDemo)) void openPane($)
+  if (autoOpen && !list.some(a => a.status === 'running' && !a.isDemo)) quietly(openPane($))
 }
 
 async function addUsage($: EngineInterface, e: TurnStepInput, u: TurnUsage, toolCalls: number) {
@@ -193,8 +233,13 @@ async function reconcile($: EngineInterface, at: number) {
 async function tick($: EngineInterface, shouldCheck: boolean) {
   const [list, m] = await Promise.all([readAgents($), readMain($)])
   const running = list.filter(a => a.status === 'running')
-  if (!m.isWorking && running.length === 0) return
+  if (!m.isWorking && running.length === 0 && !isPending(m)) return
   const at = await $.clock.now()
+  // A run whose first turn never came (another hook dropped its prompt) stops waiting.
+  const start = runStart(m)
+  if (isPending(m) && at - start > PENDING_MS) {
+    await updateMain($, x => (isPending(x) && runStart(x) === start ? { ...x, turnStartedAt: start } : x))
+  }
   await setNow($, at)
   if (shouldCheck && running.some(a => !a.isDemo && a.agentId !== undefined)) await reconcile($, at)
 }
@@ -202,7 +247,7 @@ async function tick($: EngineInterface, shouldCheck: boolean) {
 async function resetAll($: EngineInterface) {
   await updateAgents($, () => [])
   await updateMain($, m => ({ ...EMPTY_MAIN, model: m.model, effort: m.effort }))
-  await updatePanel($, p => ({ ...p, hiddenRun: undefined, showAllDone: false }))
+  await updatePanel($, p => ({ ...p, showAllDone: false }))
   listed.clear()
   endedEarly.clear()
 }
@@ -212,12 +257,15 @@ export const register: Register = (on, options) => {
   const workTitles = options.workTitles !== false
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({
-      name: 'progress-bar',
-      description:
-        'Open the Agents pane: every subagent with its crab, model, context, cost and time. `demo` plays a free demo, `clear` removes it',
-      argumentHint: 'demo | clear',
-    })
+    // A refused command costs the command alone: the clock below must start either way.
+    await $.command
+      .register({
+        name: 'progress-bar',
+        description:
+          'Open the Agents pane: every subagent with its crab, model, context, cost and time. `demo` plays a free demo, `clear` removes it',
+        argumentHint: 'demo | clear',
+      })
+      .catch(() => undefined)
     let ticks = 0
     $.clock.every(1000, () => {
       ticks += 1
@@ -236,8 +284,8 @@ export const register: Register = (on, options) => {
       }
     }
     if (arg === 'clear') {
-      await updateAgents($, list => list.filter(a => !a.isDemo))
-      return { text: 'Demo agents cleared.' }
+      await clearDemo($)
+      return { text: 'Demo cleared.' }
     }
     await openPane($)
     return { text: 'Agents pane opened. `/progress-bar demo` plays a free demo.' }
@@ -247,8 +295,11 @@ export const register: Register = (on, options) => {
   // this mod can cost a row or a number, never a prompt, a spawn or a turn.
 
   on('prompt.submit', async ($, e, next) => {
-    await beginRun($, e, workTitles).catch(() => undefined)
-    return next(e)
+    const begun = await beginRun($, e).catch(() => undefined)
+    // Resolves once the prompt's turn started, or it was queued, or a hook dropped it.
+    const entered = await next(e)
+    if (begun) await settleRun($, begun, entered.drop !== undefined, workTitles).catch(() => undefined)
+    return entered
   }).catch(($, e, next) => next(e))
 
   on('turn.start', async ($, e, next) => {
@@ -283,7 +334,8 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: 'progress-bar' }, async ($, e) => {
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
-    const Svg = 'Svg' in ui ? ui.Svg : undefined
+    // The terminal's table lists an Svg too but hands it on as an empty box: there the words stand in.
+    const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
     const [list, m, p, tick] = await Promise.all([readAgents($), readMain($), readPanel($), readNow($)])
     const at = Math.max(tick, m.turnStartedAt, ...list.map(a => a.startedAt))
 
@@ -333,7 +385,7 @@ export const register: Register = (on, options) => {
               source={agentSprite(a.design, mood)}
               alt={`${DESIGNS[a.design % DESIGNS.length]} crab, ${a.status}`}
               width={72}
-              height={48}
+              height={50}
               isInteractive={mood === 'working' || undefined}
             />
           ) : (
@@ -412,7 +464,7 @@ export const register: Register = (on, options) => {
             key="toggle-done"
             plain
             label={`${p.isDoneCollapsed ? '▸' : '▾'} Finished · ${finished.length}`}
-            onPress={() => updatePanel($, prev => ({ ...prev, isDoneCollapsed: !prev.isDoneCollapsed }))}
+            onPress={() => quietly(updatePanel($, prev => ({ ...prev, isDoneCollapsed: !prev.isDoneCollapsed })))}
           />
         )}
         {!p.isDoneCollapsed && shown.map(agentRow)}
@@ -421,7 +473,7 @@ export const register: Register = (on, options) => {
             key="toggle-all"
             plain
             label={p.showAllDone ? 'Show fewer' : `Show all ${finished.length}`}
-            onPress={() => updatePanel($, prev => ({ ...prev, showAllDone: !prev.showAllDone }))}
+            onPress={() => quietly(updatePanel($, prev => ({ ...prev, showAllDone: !prev.showAllDone })))}
           />
         )}
       </Box>
@@ -433,32 +485,48 @@ export const register: Register = (on, options) => {
     const [list, m, p] = await Promise.all([readAgents($), readMain($), readPanel($)])
     const start = runStart(m)
     const run = list.filter(a => a.startedAt >= start)
-    const isWorking = e.props.isWorking || m.isWorking || list.some(a => a.status === 'running')
-    // Once nothing works, a run that had subagents stays up as Done until the next one begins.
-    const isDone = !isWorking && run.length > 0
-    if (e.props.hasSurvey || (!isWorking && !isDone) || p.hiddenRun === start) return next(e)
+    const isWorking = e.props.isWorking || m.isWorking || isPending(m) || list.some(a => a.status === 'running')
+    // Nothing to show before the session's first run. From then on the band stays: once
+    // nothing works it shows that run as Done, subagents or not, until the next one begins.
+    if (e.props.hasSurvey || (!isWorking && start === 0)) return next(e)
+    const isDone = !isWorking
 
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
-    const Svg = 'Svg' in ui ? ui.Svg : undefined
+    // Folded, the band is its ▲ alone, run after run, until the person opens it again. It
+    // sits at the right end, where the ▼ that folded it was.
+    if (p.isBandCollapsed) {
+      return (
+        <Box flexDirection="row" justifyContent="flex-end" width="100%">
+          <Button
+            key="band-toggle"
+            plain
+            label="▲"
+            onPress={() => quietly(updatePanel($, prev => ({ ...prev, isBandCollapsed: false })))}
+          />
+        </Box>
+      )
+    }
+    // The terminal's table lists an Svg too but hands it on as an empty box: there the words stand in.
+    const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
 
     const done = run.filter(a => a.status !== 'running').length
     const title = m.title ?? 'Working'
     const percent = run.length > 0 ? Math.round(((isDone ? run.length : done) / run.length) * 100) : 0
     const state = isDone ? 'done' : run.length > 0 ? `${done} of ${run.length} done, ${percent}%` : 'working'
     // The dot, title, bar, percent and crab are one drawing, so they share a middle line;
-    // the two buttons sit beside it.
+    // the two buttons sit at the right end, the ▼ exactly where a folded band's ▲ is.
     const rowW = Math.round(Math.max(260, Math.min(1100, (e.props.bodyColumns || 100) * 8 - 90)))
 
     return (
-      <Box flexDirection="row" flexWrap="nowrap" gap={1} alignItems="center">
+      <Box flexDirection="row" flexWrap="nowrap" justifyContent="space-between" alignItems="center" width="100%">
         {Svg ? (
           <Svg
             key={`band-${isDone ? 'done' : 'work'}`}
             source={bandRow({ width: rowW, title, done, total: run.length, isDone })}
             alt={`${title}: ${state}`}
             width={rowW}
-            height={24}
+            height={BAND_H}
             isInteractive
           />
         ) : (
@@ -466,8 +534,15 @@ export const register: Register = (on, options) => {
             {title} · {state}
           </Text>
         )}
-        <Button key="open-agents" plain label={`×${list.length}`} onPress={() => void openPane($)} />
-        <Button key="hide-band" plain label="✕" onPress={() => updatePanel($, prev => ({ ...prev, hiddenRun: start }))} />
+        <Box flexDirection="row" alignItems="center" gap={1}>
+          <Button key="open-agents" plain label={`×${list.length}`} onPress={() => quietly(togglePane($))} />
+          <Button
+            key="band-toggle"
+            plain
+            label="▼"
+            onPress={() => quietly(updatePanel($, prev => ({ ...prev, isBandCollapsed: true })))}
+          />
+        </Box>
       </Box>
     )
   })

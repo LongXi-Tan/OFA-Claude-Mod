@@ -47,14 +47,16 @@ export type MainState = {
   title?: string
   /** The `runStartedAt` of a demo still playing; a real run clears it. */
   demoId?: number
+  /** The run a demo took the band from, which `/progress-bar clear` puts back. */
+  beforeDemo?: { runStartedAt?: number; turnStartedAt: number; title?: string }
 }
 
 export type PanelState = {
   isDoneCollapsed: boolean
   /** Every finished agent, not just the latest few. */
   showAllDone?: boolean
-  /** The `runStartedAt` of the run whose band the person closed. */
-  hiddenRun?: number
+  /** The band folded down to its ▴: it stays so from run to run until the person opens it. */
+  isBandCollapsed?: boolean
 }
 
 declare module 'claude-code' {

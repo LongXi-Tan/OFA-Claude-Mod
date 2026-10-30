@@ -51,6 +51,25 @@ export function setNow($: EngineInterface, at: number) {
 /** When the band's run began: the person's prompt, or the turn when no prompt marked one. */
 export const runStart = (m: MainState) => m.runStartedAt ?? m.turnStartedAt
 
+/**
+ * Whether the run has begun but its first turn has not: the moment between the person's
+ * Enter and the turn. It counts as working, or the band would flash Done as a run begins.
+ */
+export const isPending = (m: MainState) => m.runStartedAt !== undefined && m.turnStartedAt < m.runStartedAt
+
 export function openPane($: EngineInterface) {
   return $.ui.open({ id: PANE, title: 'Agents' })
+}
+
+/**
+ * The band's ×N: closes the pane when it is on screen, else brings it there. The engine's
+ * list says which, not a flag of ours: the person also closes the pane by its own mark.
+ * One open but not placed (opened unasked on a narrow screen) is opened, so it draws; one
+ * placed behind another tab is closed and opened again, which brings it to the front.
+ */
+export async function togglePane($: EngineInterface) {
+  const pane = (await $.ui.panes()).find(p => p.id === PANE)
+  if (pane?.isPlaced && pane.isShown) return $.ui.close({ id: PANE })
+  if (pane?.isPlaced) await $.ui.close({ id: PANE })
+  await openPane($)
 }

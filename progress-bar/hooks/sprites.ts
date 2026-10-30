@@ -12,16 +12,17 @@ const EYE = '#1A1A1A'
 const r = (x: number, y: number, w: number, h: number, fill: string, cls = '') =>
   `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"${cls ? ` class="${cls}"` : ''}/>`
 
-const svg = (w: number, h: number, css: string, body: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" shape-rendering="crispEdges"><style>${css}</style>${body}</svg>`
+/** An SVG document `w` x `h` units; `top` above 0 leaves headroom for what hops. */
+const svg = (w: number, h: number, css: string, body: string, top = 0) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 ${top} ${w} ${h}" shape-rendering="crispEdges"><style>${css}</style>${body}</svg>`
 
+// A working crab hops: it lifts a unit and lands, on a half-second beat, all of it at
+// once (body, costume and all four legs), so no leg parts from the body or loses a pixel.
 const BASE_CSS = `
 .walk{animation:walk 2.4s steps(1) infinite}
 @keyframes walk{0%{transform:translateX(0)}25%{transform:translateX(1px)}50%{transform:translateX(0)}75%{transform:translateX(-1px)}}
-.bob{animation:bob .5s steps(1) infinite}
-.la{animation:bob .5s steps(1) infinite}
-.lb{animation:bob .5s steps(1) infinite -.25s}
-@keyframes bob{0%{transform:translateY(0)}50%{transform:translateY(-1px)}}
+.hop{animation:hop .5s steps(1) infinite}
+@keyframes hop{0%{transform:translateY(0)}50%{transform:translateY(-1px)}}
 .blink{animation:blink 4s steps(1) infinite}
 @keyframes blink{0%{opacity:1}95%{opacity:0}97%{opacity:1}}
 .tw{animation:tw .8s steps(1) infinite}
@@ -76,14 +77,19 @@ const eyes = (ox: number, oy: number, kind: Eyes, ink = EYE) => {
   }
 }
 
-/** The crab, its body's top-left at (ox, oy); `gear` is drawn over the body, under the eyes. */
-const crab = (ox: number, oy: number, body: string, eyeKind: Eyes, gear = '', ink = EYE) => {
-  const torso =
-    r(ox, oy, 16, 12, body) + r(ox - 4, oy + 4, 4, 4, body) + r(ox + 16, oy + 4, 4, 4, body) + gear + eyes(ox, oy, eyeKind, ink)
-  const legsA = r(ox + 1, oy + 12, 2, 4, body) + r(ox + 9, oy + 12, 2, 4, body)
-  const legsB = r(ox + 5, oy + 12, 2, 4, body) + r(ox + 13, oy + 12, 2, 4, body)
+/** The four 2x4 legs under a body whose top-left is (ox, oy), at +1, +5, +9 and +13. */
+const legs = (ox: number, oy: number, body: string) =>
+  [1, 5, 9, 13].map(dx => r(ox + dx, oy + 12, 2, 4, body)).join('')
 
-  return `<g class="bob">${torso}</g><g class="la">${legsA}</g><g class="lb">${legsB}</g>`
+/**
+ * The crab, its body's top-left at (ox, oy); `gear` is drawn over the body, under the eyes.
+ * Hopping, the whole of it sits in one `.hop` group, so it lifts and lands as one piece.
+ */
+const crab = (ox: number, oy: number, body: string, eyeKind: Eyes, isHopping: boolean, gear = '', ink = EYE) => {
+  const whole =
+    r(ox, oy, 16, 12, body) + r(ox - 4, oy + 4, 4, 4, body) + r(ox + 16, oy + 4, 4, 4, body) + gear +
+    eyes(ox, oy, eyeKind, ink) + legs(ox, oy, body)
+  return isHopping ? `<g class="hop">${whole}</g>` : whole
 }
 
 // Each costume sits on the crab at ox=10, oy=7 in a 36x24 box: body x 10..25, y 7..18;
@@ -118,7 +124,7 @@ const COSTUMES: Record<(typeof DESIGNS)[number], { eyes: Eyes; gear: string; sid
     gear:
       r(10, 3, 16, 5, '#A7AFBA') + r(10, 7, 16, 1, '#7D8590') +
       `<g class="flap">${r(16, 0, 4, 3, '#D33A3A')}${r(20, 0, 3, 2, '#D33A3A')}</g>` +
-      `<g class="raise">${r(31, 0, 2, 11, '#D6DCE4')}${r(29, 11, 6, 1, '#8B6B2E')}${r(31, 12, 2, 3, '#5A3E1B')}</g>`,
+      `<g class="raise">${r(31, 2, 2, 9, '#D6DCE4')}${r(29, 11, 6, 1, '#8B6B2E')}${r(31, 12, 2, 3, '#5A3E1B')}</g>`,
   },
   Musician: {
     eyes: 'open',
@@ -143,14 +149,18 @@ const moodEyes = (mood: CrabMood, working: Eyes): Eyes =>
 
 const moodBody = (mood: CrabMood) => (mood === 'failed' || mood === 'stopped' ? GREY : BODY)
 
-/** One subagent's crab, 36x24 units: walking while it works, resting once it ends. */
+/**
+ * One subagent's crab, 36x25 units from y=-1: hopping while it works, resting once it ends.
+ * The row above 0 is headroom, so a hat or sword at the top edge stays whole mid-hop.
+ */
 export const agentSprite = (design: number, mood: CrabMood): string => {
   const c = COSTUMES[DESIGNS[design % DESIGNS.length] ?? 'Wizard']
   // Eyes over a dark mask are drawn light, so the Ninja's moods still read.
   const ink = c.eyes === 'ninja' ? '#FFFFFF' : EYE
-  const inner = (c.side ?? '') + crab(10, 7, moodBody(mood), moodEyes(mood, c.eyes), c.gear, ink)
+  const isHopping = mood === 'working'
+  const inner = (c.side ?? '') + crab(10, 7, moodBody(mood), moodEyes(mood, c.eyes), isHopping, c.gear, ink)
 
-  return svg(36, 24, BASE_CSS, `<g class="${mood === 'working' ? 'walk' : 'still'}">${inner}</g>`)
+  return svg(36, 25, BASE_CSS, `<g class="${isHopping ? 'walk' : 'still'}">${inner}</g>`, -1)
 }
 
 const MAIN_CSS = `
@@ -272,26 +282,53 @@ export const fitText = (s: string, max: number): string => {
   return `${out.trimEnd()}…`
 }
 
+
 const H = 20 // the bar's height
 const R = H / 2 // its ends are half circles
 const PILL_W = 52 // one size in every state: the Done pill's
-const CRAB_W = 28
-const LEVELS = [0.45, 0.72, 1] // the dots' brightness
-const WAVES = 10 // the trail's shimmer runs over this many slices
+const CRAB_W = 28 // the crab's room at the band's right end
+const LAPTOP_W = 16 // the room left of the crab its laptop rises into, over the percent
+const PERCENT_W = 36 // kept whether or not there is a percent, so the bar never jumps
+const WAVES = 20 // the shimmer sweeps the trail over this many slices
+const SWEEP_S = 1.3 // seconds it takes to cross, before a rest
+const SPARKS = 6 // sets of dots that twinkle white, each on its own beat
+const SCENE_S = 4 // seconds the laptop scene plays
+
+/**
+ * The band's height. The app draws its buttons' text 3px above the middle of the row
+ * (measured off screenshots of the band), so the drawing's middle line sits 3px above
+ * its own centre too, and the buttons' words line up with the title, bar and crab.
+ */
+export const BAND_H = 26
+const MID = BAND_H / 2 - 3
+
+// The trail from its start to the pill: deep, mid and light, each at two brightnesses.
+const SHADES = { work: ['#6A5DD3', '#9C8FFF', '#D6CFFF'], done: ['#3F936A', '#5BBF8A', '#A9E7C4'] }
+const LEVELS = [0.55, 1]
 
 const BAND_CSS = `
 .fg{fill:#ECECEC}.dim{fill:#9A9A9A}.track{fill:#FFFFFF;fill-opacity:.07}.tick{fill:#FFFFFF;fill-opacity:.3}
 @media (prefers-color-scheme: light){.fg{fill:#1F1F1E}.dim{fill:#6B6B6B}.track{fill:#000000;fill-opacity:.06}.tick{fill:#000000;fill-opacity:.25}}
 .pulse{animation:pulse 1.6s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
-.w{animation:wave 2s linear infinite;opacity:.45}
-@keyframes wave{0%{opacity:.45}12%{opacity:1}32%,100%{opacity:.45}}
-${Array.from({ length: WAVES }, (_, k) => `.k${k}{animation-delay:${((k * 2) / WAVES).toFixed(2)}s}`).join('')}
-.glint{animation:glint 2.2s ease-in-out infinite;opacity:0}
-@keyframes glint{0%{transform:translateX(0);opacity:0}20%{opacity:1}70%{transform:translateX(var(--run));opacity:1}80%,100%{transform:translateX(var(--run));opacity:0}}
+.w{animation:wave 2.4s linear infinite;opacity:.4}
+@keyframes wave{0%{opacity:.4}6%{opacity:1}18%{opacity:.7}36%,100%{opacity:.4}}
+${Array.from({ length: WAVES }, (_, k) => `.k${k}{animation-delay:${((k * SWEEP_S) / WAVES).toFixed(3)}s}`).join('')}
+.sp{fill:#FFFFFF;opacity:0;animation:spark 2.8s ease-in-out infinite}
+@keyframes spark{0%,70%,100%{opacity:0}80%{opacity:.95}90%{opacity:0}}
+${Array.from({ length: SPARKS }, (_, s) => `.s${s}{animation-delay:-${((s * 2.8) / SPARKS).toFixed(2)}s}`).join('')}
+.breathe{animation:breathe 2.4s ease-in-out infinite}
+@keyframes breathe{0%,100%{fill:#8B7CF6}50%{fill:#A396FF}}
 .pd{animation:pd 1.2s ease-in-out infinite;opacity:.35}
 .pd1{animation-delay:.2s}.pd2{animation-delay:.4s}
 @keyframes pd{0%,100%{opacity:.35}30%{opacity:1}}
+.key{animation:key .2s steps(1) infinite}
+@keyframes key{0%{transform:translateY(0)}50%{transform:translateY(1px)}}
+.code{transform-box:fill-box;transform-origin:0 50%;animation:code 1.6s steps(5) infinite both}
+.c2{animation-delay:.4s}.c3{animation-delay:.8s}
+@keyframes code{0%{transform:scaleX(0)}60%,100%{transform:scaleX(1)}}
+.cur{animation:cur .5s steps(1) infinite}
+@keyframes cur{0%{opacity:1}50%{opacity:0}}
 `
 
 /** Whether a dot centred at (cx, cy) lies inside the bar's rounded track of width `W`. */
@@ -301,35 +338,43 @@ const inTrack = (cx: number, cy: number, W: number) => {
 }
 
 /**
- * The bar, `W` x 20 at the origin: a trail of pixel dots from the start to the pill,
- * full height inside the rounded track, denser toward the pill, with a shimmer running
- * along it; the pill at the head, one size in every state, with a glint sweeping it;
- * a tick at each step still to come. Done, it is green from end to end and still.
+ * The bar, `W` x 20 at the origin. A trail of pixel dots runs from the start to the pill,
+ * full height inside the rounded track: denser and lighter toward the pill, a shimmer
+ * sweeping it from the start, a few dots twinkling white. The pill sits at its head, one
+ * size in every state, glossy, its colour breathing while the work runs; a tick marks
+ * each step still to come. Done, the whole bar is green and still.
  */
 const barMarkup = (W: number, done: number, total: number, isDone: boolean): string => {
   const fraction = isDone ? 1 : total > 0 ? done / total : 0
   const pillX = Math.round((W - PILL_W) * fraction)
   const trail = isDone ? W - R : pillX + R // the pill's left half hides the trail's end
-  const dot = isDone ? '#7FD1AE' : '#B9AEFF'
+  const shades = isDone ? SHADES.done : SHADES.work
 
-  // One path per shimmer slice and brightness, every dot a 2x2 square on a 3px grid.
+  // One path per slice, shade and brightness; every dot a 2x2 square on a 3px grid.
   const paths = new Map<string, string>()
+  const sparks = new Map<number, string>()
   for (let x = 0; x + 2 <= trail; x += 3) {
     const t = trail > 0 ? x / trail : 0
-    const density = isDone ? 0.35 + 0.55 * t : 0.1 + 0.8 * t ** 1.5
+    const density = isDone ? 0.35 + 0.55 * t : 0.1 + 0.85 * t ** 1.4
+    const shade = t < 0.45 ? 0 : t < 0.8 ? 1 : 2
+    const slice = isDone ? 0 : Math.min(WAVES - 1, Math.floor(t * WAVES))
     for (let y = 0; y + 2 <= H; y += 3) {
       if (!inTrack(x + 1, y + 1, W) || hash(x, y) >= density) continue
-      const level = Math.min(LEVELS.length - 1, Math.floor(hash(y + 11, x + 5) * LEVELS.length))
-      const slice = isDone ? 0 : Math.min(WAVES - 1, Math.floor(t * WAVES))
-      const key = `${slice}:${level}`
+      const level = hash(y + 11, x + 5) < 0.45 ? 0 : 1
+      const key = `${slice}:${shade}:${level}`
       paths.set(key, `${paths.get(key) ?? ''}M${x} ${y}h2v2h-2z`)
+      if (!isDone && t > 0.1 && hash(x + 3, y + 7) < 0.08) {
+        const s = Math.floor(hash(x + 13, y + 17) * SPARKS)
+        sparks.set(s, `${sparks.get(s) ?? ''}M${x} ${y}h2v2h-2z`)
+      }
     }
   }
   let dots = ''
   for (const [key, d] of paths) {
-    const [slice, level] = key.split(':').map(Number) as [number, number]
-    dots += `<path${isDone ? '' : ` class="w k${slice}"`} fill="${dot}" fill-opacity="${LEVELS[level]}" d="${d}"/>`
+    const [slice, shade, level] = key.split(':').map(Number) as [number, number, number]
+    dots += `<path${isDone ? '' : ` class="w k${slice}"`} fill="${shades[shade]}" fill-opacity="${LEVELS[level]}" d="${d}"/>`
   }
+  for (const [s, d] of sparks) dots += `<path class="sp s${s}" d="${d}"/>`
 
   let ticks = ''
   if (!isDone) {
@@ -339,26 +384,57 @@ const barMarkup = (W: number, done: number, total: number, isDone: boolean): str
     }
   }
 
-  const pill = `<rect x="${pillX}" y="0" width="${PILL_W}" height="${H}" rx="${R}" fill="${isDone ? '#5BBF8A' : '#8B7CF6'}"/>`
-
-  // The glint: a slanted stripe that never leaves the pill's straight middle, so it
-  // needs no clip to stay inside the rounded ends.
-  const a = pillX + R + 5
-  const glint = isDone
-    ? ''
-    : `<g class="glint" style="--run:${PILL_W - 2 * R - 10}px"><polygon points="${a - 1},0 ${a + 4},0 ${a},${H} ${a - 5},${H}" fill="#FFFFFF" fill-opacity=".45"/></g>`
+  const pill =
+    `<rect${isDone ? '' : ' class="breathe"'} x="${pillX}" y="0" width="${PILL_W}" height="${H}" rx="${R}" fill="${isDone ? '#5BBF8A' : '#8B7CF6'}"/>` +
+    // A soft gloss along its top.
+    `<rect x="${pillX + 5}" y="2" width="${PILL_W - 10}" height="5" rx="2.5" fill="#FFFFFF" fill-opacity=".16"/>`
 
   const mid = pillX + PILL_W / 2
-  const label = isDone
-    ? 'Done'
-    : total > 0
-      ? `${done}/${total}`
-      : '' // nothing counted yet: three dots that breathe
+  const label = isDone ? 'Done' : total > 0 ? `${done}/${total}` : '' // nothing counted yet: three dots that breathe
   const text = label
     ? `<text x="${mid}" y="${R}" dominant-baseline="central" text-anchor="middle" font-size="11" font-weight="600" fill="#FFFFFF">${esc(label)}</text>`
     : [-6, 0, 6].map((dx, i) => `<circle class="pd pd${i}" cx="${mid + dx}" cy="${R}" r="1.8" fill="#FFFFFF"/>`).join('')
 
-  return `<rect class="track" x="0" y="0" width="${W}" height="${H}" rx="${R}"/>${dots}${ticks}${pill}${glint}${text}`
+  return `<rect class="track" x="0" y="0" width="${W}" height="${H}" rx="${R}"/>${dots}${ticks}${pill}${text}`
+}
+
+// The laptop scene runs on SVG timing keyed to a click on the crab: no script, so it
+// plays in the app's script-less frame. Every part of it starts and ends together.
+const SCENE = `begin="crab.click" dur="${SCENE_S}s"`
+
+/**
+ * The band's crab in a 44x20 box, its body at x 22: hopping, or resting once done. A click
+ * plays the laptop scene in its place: a laptop rises from the ground in the 16 units left
+ * of the crab, the crab turns to it and types, code filling the screen, and the laptop
+ * sinks away. A clear rect over the crab takes the click.
+ */
+const bandCrab = (isDone: boolean) => {
+  const ox = LAPTOP_W + 6
+  const oy = 3
+  const mood: CrabMood = isDone ? 'done' : 'working'
+  const isHopping = !isDone
+  const normal =
+    `<g class="${isHopping ? 'walk' : 'still'}"><set attributeName="opacity" to="0" ${SCENE}/>` +
+    `${crab(ox, oy, BODY, moodEyes(mood, 'open'), isHopping)}</g>`
+  const laptop =
+    `<g><animateTransform attributeName="transform" type="translate" calcMode="discrete" ` +
+    `values="0 12;0 8;0 4;0 0;0 4;0 8;0 12" keyTimes="0;.03;.06;.09;.91;.94;.97" ${SCENE}/>` +
+    r(1, 3, 13, 10, '#3C4048') + r(2, 4, 11, 8, '#14202E') +
+    r(3, 5, 5, 1, '#7FD1AE', 'code') + r(4, 7, 7, 1, '#79A8FF', 'code c2') + r(3, 9, 4, 1, '#F2B36B', 'code c3') +
+    r(8, 9, 1, 1, '#FFFFFF', 'cur') +
+    r(0, 13, 16, 2, '#9AA3AD') + r(1, 13, 14, 1, '#C3CAD2') +
+    `</g>`
+  // Turned to the laptop: eyes on the screen, its far side in shade, the near arm on the keys.
+  const typist =
+    r(ox, oy, 16, 12, BODY) + r(ox + 14, oy, 2, 12, SHADE) + r(ox + 16, oy + 4, 4, 4, BODY) +
+    `<g class="blink">${r(ox + 1, oy + 2, 2, 2, EYE)}${r(ox + 8, oy + 2, 2, 2, EYE)}</g>` +
+    `<g class="key">${r(ox - 6, oy + 9, 6, 2, BODY)}</g>` +
+    legs(ox, oy, BODY)
+  const scene = `<g class="scene" opacity="0"><set attributeName="opacity" to="1" ${SCENE}/>${laptop}${typist}</g>`
+  const hit =
+    `<rect id="crab" x="${ox - 4}" y="0" width="24" height="20" fill="#000000" fill-opacity="0" ` +
+    `pointer-events="all" style="cursor:pointer"><title>Click: Claude types on a laptop</title></rect>`
+  return normal + scene + hit
 }
 
 export type BandRow = {
@@ -373,37 +449,37 @@ export type BandRow = {
 }
 
 /**
- * The whole band but its buttons, `width` x 24 CSS pixels, as one drawing so the
- * dot, title, bar, percent and crab share one middle line: every text sits on y=12
- * with `dominant-baseline="central"`, and the bar and crab are centred on it.
+ * The whole band but its buttons, `width` x BAND_H CSS pixels, as one drawing so the dot,
+ * title, bar, percent and crab share one middle line: every text sits on it with
+ * `dominant-baseline="central"`, and the bar and crab are centred on it.
  */
 export const bandRow = (b: BandRow): string => {
   const W = Math.max(220, Math.round(b.width))
   const FONT = `font-family="system-ui,'Segoe UI',sans-serif"`
-  const percentW = b.total > 0 ? 36 : 0
   const crabX = W - CRAB_W
-  const barRight = crabX - 10 - percentW
+  const barRight = crabX - 10 - PERCENT_W
   const titleMax = Math.max(40, Math.min(340, W * 0.38, barRight - 32 - 90))
   const title = fitText(b.title, titleMax)
   const titleW = Math.min(titleMax, Math.round(textWidth(title) * 100) / 100)
   const barX = Math.ceil(18 + titleW + 14)
   const barW = Math.max(PILL_W + 20, barRight - barX)
   const fraction = b.isDone ? 1 : b.total > 0 ? b.done / b.total : 0
-  const mood: CrabMood = b.isDone ? 'done' : 'working'
+  // The percent steps aside while the laptop scene uses its room.
+  const fade = `<animate attributeName="opacity" values="1;0;0;1" keyTimes="0;.06;.94;1" ${SCENE}/>`
 
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} 24" width="${W}" height="24" ${FONT}>` +
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${BAND_H}" width="${W}" height="${BAND_H}" ${FONT}>` +
     `<style>${BAND_CSS}${BASE_CSS}</style>` +
-    `<circle${b.isDone ? '' : ' class="pulse"'} cx="6" cy="12" r="4" fill="${b.isDone ? '#5BBF8A' : '#8B7CF6'}"/>` +
+    `<circle${b.isDone ? '' : ' class="pulse"'} cx="6" cy="${MID}" r="4" fill="${b.isDone ? '#5BBF8A' : '#8B7CF6'}"/>` +
     // `textLength` holds the title to the width it was given, so a font wider than
     // Segoe UI (another machine's system-ui) still never runs into the bar.
-    `<text class="fg" x="18" y="12" dominant-baseline="central" font-size="13" font-weight="600" textLength="${titleW}" lengthAdjust="spacingAndGlyphs">${esc(title)}</text>` +
-    `<g transform="translate(${barX} 2)">${barMarkup(barW, b.done, b.total, b.isDone)}</g>` +
+    `<text class="fg" x="18" y="${MID}" dominant-baseline="central" font-size="13" font-weight="600" textLength="${titleW}" lengthAdjust="spacingAndGlyphs">${esc(title)}</text>` +
+    `<g transform="translate(${barX} ${MID - R})">${barMarkup(barW, b.done, b.total, b.isDone)}</g>` +
     (b.total > 0
-      ? `<text class="dim" x="${barRight + percentW}" y="12" dominant-baseline="central" text-anchor="end" font-size="12">${Math.round(fraction * 100)}%</text>`
+      ? `<text class="dim" x="${barRight + PERCENT_W}" y="${MID}" dominant-baseline="central" text-anchor="end" font-size="12">${Math.round(fraction * 100)}%${fade}</text>`
       : '') +
-    `<svg x="${crabX}" y="2" width="${CRAB_W}" height="20" viewBox="0 0 28 20" shape-rendering="crispEdges">` +
-    `<g class="${mood === 'working' ? 'walk' : 'still'}">${crab(6, 3, BODY, moodEyes(mood, 'open'))}</g></svg>` +
+    `<svg x="${crabX - LAPTOP_W}" y="${MID - 10}" width="${LAPTOP_W + CRAB_W}" height="20" viewBox="0 0 ${LAPTOP_W + CRAB_W} 20" shape-rendering="crispEdges">` +
+    `${bandCrab(b.isDone)}</svg>` +
     `</svg>`
   )
 }

@@ -6,7 +6,7 @@ Personal Use Claude Code mods.
 
 A standalone mod that shows what Claude and its native subagents are doing, with no skill or slash command needed to start it.
 
-- **Band above the prompt**, while Claude works: a short title for the work, a bar of glowing pixel dots with a pill that steps forward as each subagent finishes (`2/6`), the percent, a walking crab, `×N` to open the Agents pane and `✕` to hide the band for this run. When the run ends it turns green and says **Done** until your next message.
+- **Band above the prompt**: a short title for the work, a bar of shimmering pixel dots with a pill that steps forward as each subagent finishes (`2/6`), the percent and a hopping crab. Click the crab and it pulls out a laptop and types for a few seconds. `×N` opens the Agents pane, or closes it when it is open. `▼` folds the band down to a lone `▲` in the same spot that brings it back; it stays folded from run to run until you open it. When the run ends the band turns green and says **Done**, and stays that way until your next message.
 - **Agents pane**, which opens by itself when subagents start, or with `/progress-bar`: session cost, tokens and work time at the top; the main session's crab, which pulls out a laptop and types while working and dozes when idle; then every subagent as its own animated pixel crab (Wizard, Pirate, Ninja, Knight, Musician, Painter) with its model, effort, context fill, tokens, cost and time. Finished agents rest with happy eyes, failed ones turn grey with crossed eyes, and stopped ones turn grey with ■. An agent woken again shows `round 2`.
 
 ### Runs and titles
@@ -17,7 +17,7 @@ A run begins with your own message when nothing is working, and a message sent m
 
 - `/progress-bar` opens the Agents pane.
 - `/progress-bar demo` plays a free demo: six fake subagents over about 20 seconds, with no model calls.
-- `/progress-bar clear` removes the demo's agents.
+- `/progress-bar clear` removes the demo, its agents and its band, and stops a demo still playing.
 
 ### Options
 
@@ -32,7 +32,7 @@ Cost is an estimate at API list prices (cache writes counted at 1.25x input). On
 
 ### Develop and test
 
-The folder type-checks with its own `tsconfig.json` once Claude Code has loaded the mod and laid its types in `.claude-plugin/types/`. The tests play the demo on a fake clock and cover runs, titles, rounds, stopped agents and `/clear`:
+The folder type-checks with its own `tsconfig.json` once Claude Code has loaded the mod and laid its types in `.claude-plugin/types/`. The tests play the demo on a fake clock and cover runs, titles, rounds, stopped agents, `/clear`, the band's buttons, and the crab's walk (every leg attached and whole in every frame):
 
 ```bash
 claude plugin test progress-bar

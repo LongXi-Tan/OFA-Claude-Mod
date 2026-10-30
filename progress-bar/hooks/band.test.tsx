@@ -51,7 +51,7 @@ test('the demo moves the band one step per finished task, then turns it Done', a
 })
 
 test('the band draws the pill one size in every state, and dots across the full height', async ($, on) => {
-  mock.clock(on, { now: 1_000 })
+  const clock = mock.clock(on, { now: 1_000 })
   on('command.register', () => ({ value: { command: 'progress-bar' } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -62,11 +62,27 @@ test('the band draws the pill one size in every state, and dots across the full 
     origin: { kind: 'composer' },
     presentation: { isFullscreen: false, columns: 120 },
   })
+  const drawn = async () => {
+    const ui = await $.ui.mount(BAND)
+    const source = String((await ui.find({ type: 'Svg' }))?.props.source ?? '')
+    await ui.unmount()
+    return source
+  }
 
-  const ui = await $.ui.mount(BAND)
-  const source = String((await ui.find({ type: 'Svg' }))?.props.source ?? '')
-  await ui.unmount()
+  // Midway, a few agents done: a trail to show, and a working pill.
+  await clock.advance(14_000)
+  const working = await drawn()
+  await clock.advance(10_000)
+  const done = await drawn()
 
-  // The pill: 52 wide and 20 tall, the Done pill's size.
-  expect(source).toMatch(/<rect x="\d+" y="0" width="52" height="20" rx="10" fill="#8B7CF6"\/>/)
+  // The pill: 52 wide and 20 tall in both states, the Done pill's size; no slanted glint.
+  const pill = (fill: string) => new RegExp(`<rect( class="breathe")? x="\\d+" y="0" width="52" height="20" rx="10" fill="${fill}"/>`)
+  expect(working).toMatch(pill('#8B7CF6'))
+  expect(done).toMatch(pill('#5BBF8A'))
+  expect(working).not.toMatch(/glint|polygon/)
+  // Dots from the bar's top row to its bottom one.
+  for (const source of [working, done]) {
+    expect(source).toMatch(/M\d+ 0h2v2h-2z/)
+    expect(source).toMatch(/M\d+ 18h2v2h-2z/)
+  }
 })
