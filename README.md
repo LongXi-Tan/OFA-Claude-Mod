@@ -46,7 +46,7 @@ The first loads the mod from this folder for one session, the second runs its te
 
 ## Attribution
 
-shoutout to JohnnyVizz on the [claude-kit](https://github.com/JohnnyVizz/claude-kit) (savvy-progress) plug in, big fan of the that plug in he made, and decided to build one mod like this progress bar myself.
+shoutout to JohnnyVizz on the [claude-kit](https://github.com/JohnnyVizz/claude-kit) (savvy-progress) plugin, big fan of the that plugin he made, used and decided to build one mod like this progress bar myself.
 
 ## License
 
