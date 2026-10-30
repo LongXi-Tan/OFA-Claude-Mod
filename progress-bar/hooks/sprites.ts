@@ -1,11 +1,12 @@
-// Pixel crabs drawn as SVG, one unit per pixel. Every animation is CSS inside
-// the SVG, so the pane draws each sprite in an interactive frame where it runs.
+// Pixel crabs and the band, drawn as SVG, one unit per pixel. Every animation is CSS
+// inside the SVG, so a surface that draws it in an interactive frame runs it.
 //
 // The crab follows Claude Desktop's proportions: a 16x12 body, 2x2 eyes in the
 // upper third, 4x4 arms at the sides and four 2x4 legs spaced evenly beneath.
 
 const BODY = '#D97757'
 const SHADE = '#B85F44'
+const GREY = '#9A9A9A'
 const EYE = '#1A1A1A'
 
 const r = (x: number, y: number, w: number, h: number, fill: string, cls = '') =>
@@ -42,27 +43,30 @@ const BASE_CSS = `
 .still,.still *{animation:none!important}
 `
 
-export type CrabMood = 'working' | 'done' | 'failed'
+/** `stopped`: interrupted; `failed`: ended on an error. Both grey. */
+export type CrabMood = 'working' | 'done' | 'failed' | 'stopped'
 
 /** The designs a subagent can get, in the order they are handed out. */
 export const DESIGNS = ['Wizard', 'Pirate', 'Ninja', 'Knight', 'Musician', 'Painter'] as const
 
-type Eyes = 'open' | 'happy' | 'x' | 'left-only' | 'ninja'
+type Eyes = 'open' | 'happy' | 'x' | 'flat' | 'left-only' | 'ninja'
 
-const eyes = (ox: number, oy: number, kind: Eyes, dx = 0) => {
-  const xs = [ox + 2 + dx, ox + 12 + dx]
+const eyes = (ox: number, oy: number, kind: Eyes, ink = EYE) => {
+  const xs = [ox + 2, ox + 12]
   const y = oy + 2
   switch (kind) {
     case 'happy':
-      return xs.map(x => r(x - 1, y + 1, 1, 1, EYE) + r(x, y, 2, 1, EYE) + r(x + 2, y + 1, 1, 1, EYE)).join('')
+      return xs.map(x => r(x - 1, y + 1, 1, 1, ink) + r(x, y, 2, 1, ink) + r(x + 2, y + 1, 1, 1, ink)).join('')
     case 'x':
       return xs
         .map(
           x =>
-            r(x - 1, y - 1, 1, 1, EYE) + r(x + 2, y - 1, 1, 1, EYE) + r(x, y, 2, 2, EYE) +
-            r(x - 1, y + 2, 1, 1, EYE) + r(x + 2, y + 2, 1, 1, EYE),
+            r(x - 1, y - 1, 1, 1, ink) + r(x + 2, y - 1, 1, 1, ink) + r(x, y, 2, 2, ink) +
+            r(x - 1, y + 2, 1, 1, ink) + r(x + 2, y + 2, 1, 1, ink),
         )
         .join('')
+    case 'flat':
+      return xs.map(x => r(x - 1, y + 1, 4, 1, ink)).join('')
     case 'left-only':
       return `<g class="blink">${r(xs[0]!, y, 2, 2, EYE)}</g>`
     case 'ninja':
@@ -73,9 +77,9 @@ const eyes = (ox: number, oy: number, kind: Eyes, dx = 0) => {
 }
 
 /** The crab, its body's top-left at (ox, oy); `gear` is drawn over the body, under the eyes. */
-const crab = (ox: number, oy: number, body: string, eyeKind: Eyes, gear = '') => {
+const crab = (ox: number, oy: number, body: string, eyeKind: Eyes, gear = '', ink = EYE) => {
   const torso =
-    r(ox, oy, 16, 12, body) + r(ox - 4, oy + 4, 4, 4, body) + r(ox + 16, oy + 4, 4, 4, body) + gear + eyes(ox, oy, eyeKind)
+    r(ox, oy, 16, 12, body) + r(ox - 4, oy + 4, 4, 4, body) + r(ox + 16, oy + 4, 4, 4, body) + gear + eyes(ox, oy, eyeKind, ink)
   const legsA = r(ox + 1, oy + 12, 2, 4, body) + r(ox + 9, oy + 12, 2, 4, body)
   const legsB = r(ox + 5, oy + 12, 2, 4, body) + r(ox + 13, oy + 12, 2, 4, body)
 
@@ -134,25 +138,20 @@ const COSTUMES: Record<(typeof DESIGNS)[number], { eyes: Eyes; gear: string; sid
   },
 }
 
-const moodEyes = (mood: CrabMood, working: Eyes): Eyes => (mood === 'done' ? 'happy' : mood === 'failed' ? 'x' : working)
+const moodEyes = (mood: CrabMood, working: Eyes): Eyes =>
+  mood === 'done' ? 'happy' : mood === 'failed' ? 'x' : mood === 'stopped' ? 'flat' : working
 
-/** One subagent's crab, 36x24 units: walking while it works, resting once done. */
+const moodBody = (mood: CrabMood) => (mood === 'failed' || mood === 'stopped' ? GREY : BODY)
+
+/** One subagent's crab, 36x24 units: walking while it works, resting once it ends. */
 export const agentSprite = (design: number, mood: CrabMood): string => {
   const c = COSTUMES[DESIGNS[design % DESIGNS.length] ?? 'Wizard']
-  const body = mood === 'failed' ? '#9A9A9A' : BODY
-  const inner = (c.side ?? '') + crab(10, 7, body, moodEyes(mood, c.eyes), c.gear)
+  // Eyes over a dark mask are drawn light, so the Ninja's moods still read.
+  const ink = c.eyes === 'ninja' ? '#FFFFFF' : EYE
+  const inner = (c.side ?? '') + crab(10, 7, moodBody(mood), moodEyes(mood, c.eyes), c.gear, ink)
 
   return svg(36, 24, BASE_CSS, `<g class="${mood === 'working' ? 'walk' : 'still'}">${inner}</g>`)
 }
-
-/** The bare crab, 28x20 units, for the band. */
-export const plainSprite = (mood: CrabMood): string =>
-  svg(
-    28,
-    20,
-    BASE_CSS,
-    `<g class="${mood === 'working' ? 'walk' : 'still'}">${crab(6, 3, mood === 'failed' ? '#9A9A9A' : BODY, moodEyes(mood, 'open'))}</g>`,
-  )
 
 const MAIN_CSS = `
 .rise{animation:rise .5s steps(3) both}
@@ -229,6 +228,8 @@ export const barSprite = (width: number, fraction: number, color = '#D97757'): s
   )
 }
 
+// ---- The band -------------------------------------------------------------------
+
 // A fixed scatter, so the dots stay put between redraws.
 const hash = (x: number, y: number) => {
   let h = (x * 374761393 + y * 668265263) | 0
@@ -238,62 +239,171 @@ const hash = (x: number, y: number) => {
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
+// Advance widths of ASCII 32..126 in 13px semibold system-ui (Segoe UI on Windows),
+// measured in Chromium: space, punctuation, digits, A-Z, a-z and the rest in code order.
+const ASCII_W = [
+  3.62, 4.53, 6.77, 8.32, 8.02, 12.11, 11.85, 4.01, 5.07, 5.07, 6.34, 9.9, 3.71, 5.67, 3.71, 6.15,
+  8.02, 8.02, 8.02, 8.02, 8.02, 8.02, 8.02, 8.02, 8.02, 8.02, 3.71, 3.71, 9.9, 9.9, 9.9, 6.16, 13.39,
+  9.78, 8.89, 8.38, 10.29, 7.43, 7.26, 9.95, 10.68, 4.36, 5.79, 9.01, 7.11, 13.37, 11.03, 10.64, 8.55,
+  10.64, 9.08, 7.82, 8.38, 10.09, 9.29, 13.99, 9.1, 8.43, 8.46, 5.07, 6.04, 5.07, 9.9, 5.83, 4.34,
+  7.51, 8.66, 6.72, 8.64, 7.57, 5.27, 8.64, 8.39, 3.85, 4.11, 7.75, 3.85, 12.77, 8.42, 8.55, 8.66,
+  8.64, 5.51, 6.42, 5.38, 8.42, 7.5, 11.07, 7.6, 7.47, 6.68, 5.07, 4.44, 5.07, 9.9,
+]
+
+const charWidth = (c: string) => {
+  const code = c.codePointAt(0) ?? 0
+  if (code >= 32 && code <= 126) return ASCII_W[code - 32] ?? 8
+  if (c === '…') return 12.52
+  // CJK, kana, hangul and full-width forms draw a full em.
+  return /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(c) ? 13 : 8.5
+}
+
+/** How wide a run of 13px semibold system-ui text draws, in CSS pixels. */
+export const textWidth = (s: string) => [...s].reduce((w, c) => w + charWidth(c), 0)
+
+/** `s`, cut with an ellipsis to fit `max` pixels. */
+export const fitText = (s: string, max: number): string => {
+  if (textWidth(s) <= max) return s
+  let out = ''
+  for (const c of s) {
+    if (textWidth(`${out}${c}…`) > max) break
+    out += c
+  }
+  return `${out.trimEnd()}…`
+}
+
+const H = 20 // the bar's height
+const R = H / 2 // its ends are half circles
+const PILL_W = 52 // one size in every state: the Done pill's
+const CRAB_W = 28
+const LEVELS = [0.45, 0.72, 1] // the dots' brightness
+const WAVES = 10 // the trail's shimmer runs over this many slices
+
 const BAND_CSS = `
-.t0,.t1,.t2,.t3{animation:glow 1.6s ease-in-out infinite}
-.t1{animation-delay:-.4s}.t2{animation-delay:-.8s}.t3{animation-delay:-1.2s}
-@keyframes glow{0%,100%{opacity:.25}50%{opacity:1}}
-.shine{animation:shine 1.8s linear infinite}
-@keyframes shine{0%{transform:translateX(0)}100%{transform:translateX(var(--run))}}
+.fg{fill:#ECECEC}.dim{fill:#9A9A9A}.track{fill:#FFFFFF;fill-opacity:.07}.tick{fill:#FFFFFF;fill-opacity:.3}
+@media (prefers-color-scheme: light){.fg{fill:#1F1F1E}.dim{fill:#6B6B6B}.track{fill:#000000;fill-opacity:.06}.tick{fill:#000000;fill-opacity:.25}}
+.pulse{animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.w{animation:wave 2s linear infinite;opacity:.45}
+@keyframes wave{0%{opacity:.45}12%{opacity:1}32%,100%{opacity:.45}}
+${Array.from({ length: WAVES }, (_, k) => `.k${k}{animation-delay:${((k * 2) / WAVES).toFixed(2)}s}`).join('')}
+.glint{animation:glint 2.2s ease-in-out infinite;opacity:0}
+@keyframes glint{0%{transform:translateX(0);opacity:0}20%{opacity:1}70%{transform:translateX(var(--run));opacity:1}80%,100%{transform:translateX(var(--run));opacity:0}}
+.pd{animation:pd 1.2s ease-in-out infinite;opacity:.35}
+.pd1{animation-delay:.2s}.pd2{animation-delay:.4s}
+@keyframes pd{0%,100%{opacity:.35}30%{opacity:1}}
 `
 
-/**
- * The band's bar, `width` x 20 CSS pixels: a trail of glowing pixel dots up to the
- * fill, a pill at its head that carries `label` with a shine sweeping over it, and a
- * tick at each step still to come. Done, it turns green from end to end.
- */
-export const bandBar = (width: number, fraction: number, label: string, isDone: boolean, steps: number): string => {
-  const W = Math.max(80, Math.round(width))
-  const H = 20
-  const pill = isDone ? '#5BBF8A' : '#8B7CF6'
-  const dot = isDone ? '#7FD1AE' : '#B9AEFF'
-  const pillW = Math.min(W, Math.round(label.length * 6.6 + 24))
-  const fillW = isDone ? W : Math.max(pillW, Math.round(W * Math.max(0, Math.min(1, fraction))))
-  const pillX = fillW - pillW
+/** Whether a dot centred at (cx, cy) lies inside the bar's rounded track of width `W`. */
+const inTrack = (cx: number, cy: number, W: number) => {
+  const x = Math.min(Math.max(cx, R), W - R)
+  return (cx - x) ** 2 + (cy - R) ** 2 <= (R - 0.5) ** 2
+}
 
-  let dots = ''
-  for (let x = 2; x < pillX + 4; x += 3) {
-    for (let y = 3; y < H - 3; y += 3) {
-      const density = isDone ? 0.5 : 0.12 + 0.6 * (x / Math.max(1, pillX))
-      if (hash(x, y) >= density) continue
-      const opacity = (0.35 + 0.65 * hash(y, x)).toFixed(2)
-      dots += `<rect x="${x}" y="${y}" width="2" height="2" fill="${dot}" opacity="${opacity}"${
-        isDone ? '' : ` class="t${Math.floor(hash(x + 7, y + 3) * 4)}"`
-      }/>`
+/**
+ * The bar, `W` x 20 at the origin: a trail of pixel dots from the start to the pill,
+ * full height inside the rounded track, denser toward the pill, with a shimmer running
+ * along it; the pill at the head, one size in every state, with a glint sweeping it;
+ * a tick at each step still to come. Done, it is green from end to end and still.
+ */
+const barMarkup = (W: number, done: number, total: number, isDone: boolean): string => {
+  const fraction = isDone ? 1 : total > 0 ? done / total : 0
+  const pillX = Math.round((W - PILL_W) * fraction)
+  const trail = isDone ? W - R : pillX + R // the pill's left half hides the trail's end
+  const dot = isDone ? '#7FD1AE' : '#B9AEFF'
+
+  // One path per shimmer slice and brightness, every dot a 2x2 square on a 3px grid.
+  const paths = new Map<string, string>()
+  for (let x = 0; x + 2 <= trail; x += 3) {
+    const t = trail > 0 ? x / trail : 0
+    const density = isDone ? 0.35 + 0.55 * t : 0.1 + 0.8 * t ** 1.5
+    for (let y = 0; y + 2 <= H; y += 3) {
+      if (!inTrack(x + 1, y + 1, W) || hash(x, y) >= density) continue
+      const level = Math.min(LEVELS.length - 1, Math.floor(hash(y + 11, x + 5) * LEVELS.length))
+      const slice = isDone ? 0 : Math.min(WAVES - 1, Math.floor(t * WAVES))
+      const key = `${slice}:${level}`
+      paths.set(key, `${paths.get(key) ?? ''}M${x} ${y}h2v2h-2z`)
     }
+  }
+  let dots = ''
+  for (const [key, d] of paths) {
+    const [slice, level] = key.split(':').map(Number) as [number, number]
+    dots += `<path${isDone ? '' : ` class="w k${slice}"`} fill="${dot}" fill-opacity="${LEVELS[level]}" d="${d}"/>`
   }
 
   let ticks = ''
-  if (!isDone && steps > 1) {
-    for (let k = 1; k < steps; k++) {
-      const tx = Math.round((W * k) / steps)
-      if (tx > fillW + 4 && tx < W - 4) ticks += `<rect x="${tx}" y="6" width="1" height="8" fill="#FFFFFF" opacity=".28"/>`
+  if (!isDone) {
+    for (let k = 1; k < total; k++) {
+      const c = Math.round((W - PILL_W) * (k / total) + PILL_W / 2)
+      if (c > pillX + PILL_W + 3 && c < W - 3) ticks += `<rect class="tick" x="${c}" y="6" width="1" height="8"/>`
     }
   }
 
-  const shine = isDone
+  const pill = `<rect x="${pillX}" y="0" width="${PILL_W}" height="${H}" rx="${R}" fill="${isDone ? '#5BBF8A' : '#8B7CF6'}"/>`
+
+  // The glint: a slanted stripe that never leaves the pill's straight middle, so it
+  // needs no clip to stay inside the rounded ends.
+  const a = pillX + R + 5
+  const glint = isDone
     ? ''
-    : `<clipPath id="p"><rect x="${pillX}" y="0" width="${pillW}" height="${H}" rx="10"/></clipPath>` +
-      `<g clip-path="url(#p)"><g class="shine" style="--run:${pillW + 30}px"><rect x="${pillX - 24}" y="0" width="12" height="${H}" fill="#FFFFFF" opacity=".35" transform="skewX(-20)"/></g></g>`
+    : `<g class="glint" style="--run:${PILL_W - 2 * R - 10}px"><polygon points="${a - 1},0 ${a + 4},0 ${a},${H} ${a - 5},${H}" fill="#FFFFFF" fill-opacity=".45"/></g>`
+
+  const mid = pillX + PILL_W / 2
+  const label = isDone
+    ? 'Done'
+    : total > 0
+      ? `${done}/${total}`
+      : '' // nothing counted yet: three dots that breathe
+  const text = label
+    ? `<text x="${mid}" y="${R}" dominant-baseline="central" text-anchor="middle" font-size="11" font-weight="600" fill="#FFFFFF">${esc(label)}</text>`
+    : [-6, 0, 6].map((dx, i) => `<circle class="pd pd${i}" cx="${mid + dx}" cy="${R}" r="1.8" fill="#FFFFFF"/>`).join('')
+
+  return `<rect class="track" x="0" y="0" width="${W}" height="${H}" rx="${R}"/>${dots}${ticks}${pill}${glint}${text}`
+}
+
+export type BandRow = {
+  /** CSS pixels across. */
+  width: number
+  /** The run's work title; cut to fit. */
+  title: string
+  /** This run's subagents: how many have ended, and how many there are. */
+  done: number
+  total: number
+  isDone: boolean
+}
+
+/**
+ * The whole band but its buttons, `width` x 24 CSS pixels, as one drawing so the
+ * dot, title, bar, percent and crab share one middle line: every text sits on y=12
+ * with `dominant-baseline="central"`, and the bar and crab are centred on it.
+ */
+export const bandRow = (b: BandRow): string => {
+  const W = Math.max(220, Math.round(b.width))
+  const FONT = `font-family="system-ui,'Segoe UI',sans-serif"`
+  const percentW = b.total > 0 ? 36 : 0
+  const crabX = W - CRAB_W
+  const barRight = crabX - 10 - percentW
+  const titleMax = Math.max(40, Math.min(340, W * 0.38, barRight - 32 - 90))
+  const title = fitText(b.title, titleMax)
+  const titleW = Math.min(titleMax, Math.round(textWidth(title) * 100) / 100)
+  const barX = Math.ceil(18 + titleW + 14)
+  const barW = Math.max(PILL_W + 20, barRight - barX)
+  const fraction = b.isDone ? 1 : b.total > 0 ? b.done / b.total : 0
+  const mood: CrabMood = b.isDone ? 'done' : 'working'
 
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><style>${BAND_CSS}</style>` +
-    `<rect x="0" y="0" width="${W}" height="${H}" rx="10" fill="#FFFFFF" opacity=".06"/>` +
-    dots +
-    ticks +
-    `<rect x="${pillX}" y="0" width="${pillW}" height="${H}" rx="10" fill="${pill}"/>` +
-    shine +
-    `<text x="${pillX + pillW / 2}" y="14" text-anchor="middle" font-size="11" font-weight="600" ` +
-    `font-family="system-ui,'Segoe UI',sans-serif" fill="#FFFFFF">${esc(label)}</text>` +
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} 24" width="${W}" height="24" ${FONT}>` +
+    `<style>${BAND_CSS}${BASE_CSS}</style>` +
+    `<circle${b.isDone ? '' : ' class="pulse"'} cx="6" cy="12" r="4" fill="${b.isDone ? '#5BBF8A' : '#8B7CF6'}"/>` +
+    // `textLength` holds the title to the width it was given, so a font wider than
+    // Segoe UI (another machine's system-ui) still never runs into the bar.
+    `<text class="fg" x="18" y="12" dominant-baseline="central" font-size="13" font-weight="600" textLength="${titleW}" lengthAdjust="spacingAndGlyphs">${esc(title)}</text>` +
+    `<g transform="translate(${barX} 2)">${barMarkup(barW, b.done, b.total, b.isDone)}</g>` +
+    (b.total > 0
+      ? `<text class="dim" x="${barRight + percentW}" y="12" dominant-baseline="central" text-anchor="end" font-size="12">${Math.round(fraction * 100)}%</text>`
+      : '') +
+    `<svg x="${crabX}" y="2" width="${CRAB_W}" height="20" viewBox="0 0 28 20" shape-rendering="crispEdges">` +
+    `<g class="${mood === 'working' ? 'walk' : 'still'}">${crab(6, 3, BODY, moodEyes(mood, 'open'))}</g></svg>` +
     `</svg>`
   )
 }

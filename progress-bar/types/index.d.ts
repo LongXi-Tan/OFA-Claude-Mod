@@ -1,4 +1,5 @@
-export type AgentStatus = 'running' | 'done' | 'failed'
+/** `stopped`: interrupted (TaskStop, Esc); `failed`: ended on an error or a refusal. */
+export type AgentStatus = 'running' | 'done' | 'failed' | 'stopped'
 
 /** One subagent the session spawned, as the pane draws it. */
 export type AgentRow = {
@@ -12,6 +13,10 @@ export type AgentRow = {
   design: number
   status: AgentStatus
   isBackground: boolean
+  /** A fake row `/progress-bar demo` made; `/progress-bar clear` removes them. */
+  isDemo?: boolean
+  /** How many times it has run: a finished agent woken again (a message, a resume) runs another round. */
+  rounds?: number
   startedAt: number
   endedAt?: number
   /** Tokens processed over all its requests: input, output and cache reads and writes. */
@@ -23,7 +28,7 @@ export type AgentRow = {
   toolCalls: number
 }
 
-/** The main session's own loop. */
+/** The main session's own loop, and the run the band shows. */
 export type MainState = {
   isWorking: boolean
   turnStartedAt: number
@@ -33,14 +38,23 @@ export type MainState = {
   costUsd: number
   model: string
   effort?: string
-  /** The first line of the prompt that started the turn, the band's title. */
+  /**
+   * When the current run began: the person's prompt that found nothing working.
+   * The band counts the subagents spawned since; a message sent mid-run joins it.
+   */
+  runStartedAt?: number
+  /** The run's work title, named from the prompt that began it; unset while it is being named. */
   title?: string
+  /** The `runStartedAt` of a demo still playing; a real run clears it. */
+  demoId?: number
 }
 
 export type PanelState = {
   isDoneCollapsed: boolean
-  /** The `turnStartedAt` of the turn whose band the person closed. */
-  hiddenTurn?: number
+  /** Every finished agent, not just the latest few. */
+  showAllDone?: boolean
+  /** The `runStartedAt` of the run whose band the person closed. */
+  hiddenRun?: number
 }
 
 declare module 'claude-code' {

@@ -1,224 +1,295 @@
-import { atom, read, update } from 'claude-code'
-import type { EngineInterface, ModelUsage, Register } from 'claude-code'
+import type {
+  AgentSpawnInput,
+  AgentStatus as EngineAgentStatus,
+  EngineInterface,
+  PromptSubmitInput,
+  Register,
+  TurnCompleteInput,
+  TurnStepInput,
+  TurnUsage,
+} from 'claude-code'
 
-import type { AgentRow, MainState, PanelState } from '../types'
-import { DESIGNS, agentSprite, bandBar, barSprite, mainSprite, plainSprite } from './sprites'
+import type { AgentRow, AgentStatus } from '../types'
+import { DEMO_MS, runDemo } from './demo'
+import { costOf, fmtCost, fmtTime, fmtTokens, modelName, tokensOf, windowOf } from './model'
+import { DESIGNS, agentSprite, bandRow, barSprite, mainSprite } from './sprites'
+import type { CrabMood } from './sprites'
+import {
+  EMPTY_MAIN,
+  KEEP,
+  openPane,
+  readAgents,
+  readMain,
+  readNow,
+  readPanel,
+  runStart,
+  setNow,
+  updateAgents,
+  updateMain,
+  updatePanel,
+} from './state'
+import { nameRun } from './title'
 
-const PANE = 'progress-bar'
-const TITLE = 'Agents'
-const KEEP = 60
+// The person's own prompts: typed in the terminal or the app (which arrives as its SDK
+// host's), or sent from a phone. Notifications, schedules and other sessions are not.
+const PERSON = new Set(['composer', 'sdk', 'bridge'])
+// Finished rows the pane draws until the person asks for all of them.
+const FINISHED_SHOWN = 8
+// How the engine's agent list names an agent that is no longer running.
+const SETTLED: Partial<Record<EngineAgentStatus, AgentStatus>> = {
+  completed: 'done',
+  failed: 'failed',
+  killed: 'stopped',
+}
+const MARK: Record<AgentStatus, string> = { running: '', done: '✓ ', failed: '✗ ', stopped: '■ ' }
 
-// Change a tag when that value's fields change: it declines what an earlier
-// version stored, which outlives a reload.
-const agents = atom({ plugin: 'progress-bar', key: 'agents' } as const, [] as AgentRow[], {
-  shape: 'agents-1',
-})
-const main = atom(
-  { plugin: 'progress-bar', key: 'main' } as const,
-  { isWorking: false, turnStartedAt: 0, workMs: 0, tokens: 0, costUsd: 0, model: '' } as MainState,
-  { shape: 'main-1' },
-)
-const now = atom({ plugin: 'progress-bar', key: 'now' } as const, 0)
-const panel = atom({ plugin: 'progress-bar', key: 'panel' } as const, { isDoneCollapsed: false } as PanelState)
+const moodOf = (s: AgentStatus): CrabMood => (s === 'running' ? 'working' : s)
+const elapsedOf = (a: AgentRow, at: number) => (a.endedAt ?? Math.max(at, a.startedAt)) - a.startedAt
 
-// Dollars per million tokens: input, output, cache read, cache write (writes at 1.25x input).
-type Price = [number, number, number, number]
-const OPUS_5_5: Price = [4, 20, 0.2, 5]
-const PRICES: [RegExp, Price][] = [
-  [/fable|mythos/, [10, 50, 0.25, 12.5]],
-  [/opus-5-5/, OPUS_5_5],
-  [/opus/, [5, 25, 0.5, 6.25]],
-  [/sonnet-5/, [2, 10, 0.2, 2.5]],
-  [/sonnet/, [3, 15, 0.3, 3.75]],
-  [/haiku-5/, [0.1, 0.5, 0.01, 0.125]],
-  [/haiku/, [1, 5, 0.1, 1.25]],
-]
+// Module memory, which a reload empties: agents the engine's list has shown, and the
+// ends heard before their spawn's row was written.
+const listed = new Set<string>()
+const endedEarly = new Map<string, AgentStatus>()
 
-const costOf = (model: string, u: ModelUsage): number => {
-  const [i, o, rd, w] = PRICES.find(([re]) => re.test(model.toLowerCase()))?.[1] ?? OPUS_5_5
-  return (
-    (u.input_tokens * i + u.output_tokens * o + u.cache_read_input_tokens * rd + u.cache_creation_input_tokens * w) /
-    1e6
+/** The person's prompt begins a new run when nothing is working; one sent mid-run joins it. */
+async function beginRun($: EngineInterface, e: PromptSubmitInput, useModel: boolean) {
+  if (e.isMeta || e.command !== undefined || !PERSON.has(e.origin.kind) || e.text.trim() === '') return
+  const [list, m] = await Promise.all([readAgents($), readMain($)])
+  const isBusy = (m.isWorking && m.demoId === undefined) || list.some(a => a.status === 'running' && !a.isDemo)
+  if (isBusy) return
+
+  const at = await $.clock.now()
+  const previous = m.demoId === undefined ? m.title : undefined
+  await updateMain($, prev => ({ ...prev, runStartedAt: at, demoId: undefined, title: undefined }))
+  await updateAgents($, rows => rows.filter(a => !a.isDemo))
+  await updatePanel($, p => ({ ...p, hiddenRun: undefined }))
+  // Named off this dispatch, so the prompt never waits on the model.
+  const text = e.text
+  $.clock.after(0, () => void nameRun($, text, at, previous, useModel).catch(() => undefined))
+}
+
+async function startTurn($: EngineInterface, agentId: string | undefined) {
+  const at = await $.clock.now()
+  if (agentId === undefined) {
+    await updateMain($, m => ({ ...m, isWorking: true, turnStartedAt: at, demoId: undefined }))
+  } else {
+    // A finished agent woken again (a message to it, a resume) runs another round.
+    await updateAgents($, list =>
+      list.map((a): AgentRow =>
+        a.agentId === agentId && a.status !== 'running'
+          ? { ...a, status: 'running', endedAt: undefined, rounds: (a.rounds ?? 1) + 1 }
+          : a,
+      ),
+    )
+  }
+  await setNow($, at)
+}
+
+async function addAgent($: EngineInterface, e: AgentSpawnInput, model: string, agentId: string | undefined, autoOpen: boolean) {
+  const at = await $.clock.now()
+  const list = await readAgents($)
+  const early = agentId === undefined ? undefined : endedEarly.get(agentId)
+  const row: AgentRow = {
+    id: agentId ?? e.tool_use_id,
+    agentId,
+    description: e.description || e.subagentType,
+    subagentType: e.subagentType,
+    model: model || e.model || e.parentModel,
+    design: ((list.at(-1)?.design ?? -1) + 1) % DESIGNS.length,
+    status: early ?? 'running',
+    endedAt: early === undefined ? undefined : at,
+    isBackground: e.background,
+    startedAt: at,
+    tokens: 0,
+    costUsd: 0,
+    contextTokens: 0,
+    steps: 0,
+    toolCalls: 0,
+  }
+  await updateAgents($, prev => [...prev.filter(a => a.id !== row.id), row].slice(-KEEP))
+  await setNow($, at)
+  if (autoOpen && !list.some(a => a.status === 'running' && !a.isDemo)) void openPane($)
+}
+
+async function addUsage($: EngineInterface, e: TurnStepInput, u: TurnUsage, toolCalls: number) {
+  const model = u.model || e.model
+  const cost = costOf(model, u)
+  const tokens = tokensOf(u)
+  const effort = e.effort === undefined ? undefined : String(e.effort)
+  if (e.agentId === undefined) {
+    await updateMain($, m => ({ ...m, model, effort, tokens: m.tokens + tokens, costUsd: m.costUsd + cost }))
+    return
+  }
+  const agentId = e.agentId
+  await updateAgents($, list =>
+    list.map((a): AgentRow =>
+      a.agentId !== agentId
+        ? a
+        : {
+            ...a,
+            model,
+            effort,
+            steps: a.steps + 1,
+            toolCalls: a.toolCalls + toolCalls,
+            tokens: a.tokens + tokens,
+            costUsd: a.costUsd + cost,
+            contextTokens: tokens,
+          },
+    ),
   )
 }
 
-const tokensOf = (u: ModelUsage) =>
-  u.input_tokens + u.output_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens
-
-const windowOf = (model: string) => (/haiku-4|claude-3/i.test(model) ? 200_000 : 1_000_000)
-
-/** `claude-opus-5-5[1m]` reads as `Opus 5.5`. */
-const modelName = (id: string): string => {
-  const m = /(fable|mythos|opus|sonnet|haiku)-(\d+)(?:-(\d{1,2})(?!\d))?/i.exec(id)
-  const [, family = '', major = '', minor] = m ?? []
-  if (!family) return id || 'model'
-  return `${family.charAt(0).toUpperCase()}${family.slice(1)} ${major}${minor ? `.${minor}` : ''}`
+async function endTurn($: EngineInterface, e: TurnCompleteInput) {
+  const at = await $.clock.now()
+  if (e.agentId === undefined) {
+    await updateMain($, m => ({ ...m, isWorking: false, workMs: m.workMs + e.durationMs }))
+  } else {
+    const agentId = e.agentId
+    const status: AgentStatus = e.reason === 'answer' ? 'done' : e.reason === 'aborted' ? 'stopped' : 'failed'
+    let isFound = false
+    await updateAgents($, list =>
+      list.map((a): AgentRow => {
+        if (a.agentId !== agentId) return a
+        isFound = true
+        // Steps normally carry the usage; a run whose steps went unseen falls back to the turn's sum.
+        const fallback = a.steps === 0 ? e.usage : undefined
+        return {
+          ...a,
+          status,
+          endedAt: at,
+          ...(fallback
+            ? {
+                model: fallback.model || a.model,
+                tokens: tokensOf(fallback),
+                costUsd: costOf(fallback.model || a.model, fallback),
+              }
+            : {}),
+        }
+      }),
+    )
+    // An end heard before the spawn's row was written: the row starts out ended.
+    if (!isFound) endedEarly.set(agentId, status)
+  }
+  await setNow($, at)
 }
 
-const fmtTokens = (n: number) =>
-  n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : `${Math.round(n)}`
-
-const fmtCost = (usd: number) => `≈$${usd >= 10 ? usd.toFixed(1) : usd.toFixed(2)}`
-
-const fmtTime = (ms: number) => {
-  const s = Math.max(0, Math.floor(ms / 1000))
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const ss = String(s % 60).padStart(2, '0')
-  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
+/** Settles running rows the engine's agent list shows have ended, when their end went unheard. */
+async function reconcile($: EngineInterface, at: number) {
+  const infos = await $.agent.list()
+  const statusOf = new Map(infos.map(i => [i.id, i.status]))
+  await updateAgents($, list =>
+    list.map((a): AgentRow => {
+      if (a.status !== 'running' || a.isDemo || a.agentId === undefined) return a
+      const status = statusOf.get(a.agentId)
+      // Gone from a list it was on: the engine dropped it a while after it ended.
+      const settled = status === undefined ? (listed.has(a.agentId) ? 'done' : undefined) : SETTLED[status]
+      return settled ? { ...a, status: settled, endedAt: at } : a
+    }),
+  )
+  for (const id of statusOf.keys()) listed.add(id)
 }
 
-const elapsedOf = (a: AgentRow, at: number) => (a.endedAt ?? Math.max(at, a.startedAt)) - a.startedAt
-
-function openPane($: EngineInterface) {
-  return $.ui.open({ id: PANE, title: TITLE })
+/** Once a second: moves the clocks while anything works, and every fifth, checks the agent list. */
+async function tick($: EngineInterface, shouldCheck: boolean) {
+  const [list, m] = await Promise.all([readAgents($), readMain($)])
+  const running = list.filter(a => a.status === 'running')
+  if (!m.isWorking && running.length === 0) return
+  const at = await $.clock.now()
+  await setNow($, at)
+  if (shouldCheck && running.some(a => !a.isDemo && a.agentId !== undefined)) await reconcile($, at)
 }
 
-export const register: Register = on => {
+async function resetAll($: EngineInterface) {
+  await updateAgents($, () => [])
+  await updateMain($, m => ({ ...EMPTY_MAIN, model: m.model, effort: m.effort }))
+  await updatePanel($, p => ({ ...p, hiddenRun: undefined, showAllDone: false }))
+  listed.clear()
+  endedEarly.clear()
+}
+
+export const register: Register = (on, options) => {
+  const autoOpen = options.autoOpenPane !== false
+  const workTitles = options.workTitles !== false
+
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'progress-bar',
-      description: 'Open the Agents pane: every subagent with its crab, model, context, cost and time',
+      description:
+        'Open the Agents pane: every subagent with its crab, model, context, cost and time. `demo` plays a free demo, `clear` removes it',
+      argumentHint: 'demo | clear',
     })
-
-    // Ticks the clocks once a second, quiet while nothing works.
+    let ticks = 0
     $.clock.every(1000, () => {
-      void (async () => {
-        const [list, m] = await Promise.all([read($, agents), read($, main)])
-        if (!m.isWorking && !list.some(a => a.status === 'running')) return
-        const at = await $.clock.now()
-        await update($, now, () => at)
-      })()
+      ticks += 1
+      void tick($, ticks % 5 === 0).catch(() => undefined)
     })
-
     return next(e)
   })
 
-  on('command.run', { command: 'progress-bar' }, async $ => {
+  on('command.run', { command: 'progress-bar' }, async ($, e) => {
+    // `[demo]` too: an argument hint can show brackets, and people type what they see.
+    const arg = e.args.trim().toLowerCase().replace(/^\[(.*)\]$/, '$1').trim()
+    if (arg === 'demo') {
+      await runDemo($)
+      return {
+        text: `Playing the progress-bar demo: six crabs, about ${Math.round(DEMO_MS / 1000)} seconds, no model calls.`,
+      }
+    }
+    if (arg === 'clear') {
+      await updateAgents($, list => list.filter(a => !a.isDemo))
+      return { text: 'Demo agents cleared.' }
+    }
     await openPane($)
-    return { text: 'Agents pane opened.' }
+    return { text: 'Agents pane opened. `/progress-bar demo` plays a free demo.' }
   })
 
+  // Every hook below does its bookkeeping inside a catch and then hands on: a slip in
+  // this mod can cost a row or a number, never a prompt, a spawn or a turn.
+
+  on('prompt.submit', async ($, e, next) => {
+    await beginRun($, e, workTitles).catch(() => undefined)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('turn.start', async ($, e, next) => {
-    if (e.agentId === undefined) {
-      const at = await $.clock.now()
-      // A continuation has no typed text: it keeps the title of the prompt it continues.
-      const title = e.text.trim().split('\n')[0]?.slice(0, 80)
-      await update($, main, m => ({ ...m, isWorking: true, turnStartedAt: at, title: title || m.title }))
-      await update($, now, () => at)
-    }
+    await startTurn($, e.agentId).catch(() => undefined)
     return next(e)
   })
 
   on('agent.spawn', async ($, e, next) => {
     const started = await next(e)
-    if (started.deny !== undefined) return started
-
-    const at = await $.clock.now()
-    const list = await read($, agents)
-    const isFirstRunning = !list.some(a => a.status === 'running')
-    const row: AgentRow = {
-      id: started.agentId ?? e.tool_use_id,
-      agentId: started.agentId,
-      description: e.description || e.subagentType,
-      subagentType: e.subagentType,
-      model: started.model || e.model || e.parentModel,
-      design: ((list.at(-1)?.design ?? -1) + 1) % DESIGNS.length,
-      status: 'running',
-      isBackground: e.background,
-      startedAt: at,
-      tokens: 0,
-      costUsd: 0,
-      contextTokens: 0,
-      steps: 0,
-      toolCalls: 0,
+    if (started.deny === undefined) {
+      await addAgent($, e, started.model, started.agentId, autoOpen).catch(() => undefined)
     }
-    await update($, agents, prev => [...prev, row].slice(-KEEP))
-    await update($, now, () => at)
-    if (isFirstRunning) void openPane($)
-
     return started
-  }).catch(($, e, next) => next(e)) // a failure here only loses the row, never the spawn
+  }).catch(($, e, next) => next(e))
 
   on('turn.step', async function* ($, e, next) {
     const result = yield* next(e)
-    const u = result.usage
-    if (!u) return result
-
-    const model = u.model || e.model
-    const cost = costOf(model, u)
-    const tokens = tokensOf(u)
-    const effort = e.effort === undefined ? undefined : String(e.effort)
-
-    if (e.agentId === undefined) {
-      await update($, main, m => ({
-        ...m,
-        model,
-        effort,
-        tokens: m.tokens + tokens,
-        costUsd: m.costUsd + cost,
-      }))
-    } else {
-      const agentId = e.agentId
-      await update($, agents, list =>
-        list.map(a =>
-          a.agentId !== agentId
-            ? a
-            : {
-                ...a,
-                model,
-                effort,
-                steps: a.steps + 1,
-                toolCalls: a.toolCalls + result.toolUses.length,
-                tokens: a.tokens + tokens,
-                costUsd: a.costUsd + cost,
-                contextTokens: tokens,
-              },
-        ),
-      )
-    }
+    if (result.usage) await addUsage($, e, result.usage, result.toolUses.length).catch(() => undefined)
     return result
   })
 
   on('turn.complete', async ($, e, next) => {
-    const at = await $.clock.now()
-    if (e.agentId === undefined) {
-      await update($, main, m => ({ ...m, isWorking: false, workMs: m.workMs + e.durationMs }))
-    } else {
-      const agentId = e.agentId
-      await update($, agents, list =>
-        list.map((a): AgentRow => {
-          if (a.agentId !== agentId) return a
-          // Steps normally carry the usage; a run whose steps went unseen falls back to the turn's sum.
-          const fallback = a.steps === 0 && e.usage
-          return {
-            ...a,
-            status: e.reason === 'answer' ? 'done' : 'failed',
-            endedAt: at,
-            ...(fallback && e.usage
-              ? {
-                  model: e.usage.model || a.model,
-                  tokens: tokensOf(e.usage),
-                  costUsd: costOf(e.usage.model || a.model, e.usage),
-                }
-              : {}),
-          }
-        }),
-      )
-    }
-    await update($, now, () => at)
+    await endTurn($, e).catch(() => undefined)
     return next(e)
   })
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+  on('session.end', async ($, e, next) => {
+    if (e.reason === 'clear') await resetAll($).catch(() => undefined)
+    return next(e)
+  })
+
+  on('ui.render', { component: 'Pane', requestId: 'progress-bar' }, async ($, e) => {
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
     const Svg = 'Svg' in ui ? ui.Svg : undefined
-    const [list, m, p, tick] = await Promise.all([read($, agents), read($, main), read($, panel), read($, now)])
+    const [list, m, p, tick] = await Promise.all([readAgents($), readMain($), readPanel($), readNow($)])
     const at = Math.max(tick, m.turnStartedAt, ...list.map(a => a.startedAt))
 
     const running = list.filter(a => a.status === 'running').reverse()
     const finished = list.filter(a => a.status !== 'running').reverse()
+    const shown = p.showAllDone ? finished : finished.slice(0, FINISHED_SHOWN)
     const W = Math.max(220, Math.min(900, (e.props.bodyColumns || 40) * 8 - 8))
     const totalCost = m.costUsd + list.reduce((s, a) => s + a.costUsd, 0)
     const totalTokens = m.tokens + list.reduce((s, a) => s + a.tokens, 0)
@@ -236,15 +307,19 @@ export const register: Register = on => {
     )
 
     const agentRow = (a: AgentRow) => {
-      const mood = a.status === 'running' ? 'working' : a.status === 'done' ? 'done' : 'failed'
+      const mood = moodOf(a.status)
       const ctx = a.contextTokens / windowOf(a.model)
-      const tail = [
-        `ctx ${Math.round(ctx * 100)}%`,
-        fmtTokens(a.tokens),
-        fmtCost(a.costUsd),
-        fmtTime(elapsedOf(a, at)),
-      ].join(' · ')
-      const who = [DESIGNS[a.design % DESIGNS.length], a.subagentType, modelName(a.model), a.effort]
+      const tail = [`ctx ${Math.round(ctx * 100)}%`, fmtTokens(a.tokens), fmtCost(a.costUsd), fmtTime(elapsedOf(a, at))].join(
+        ' · ',
+      )
+      const who = [
+        DESIGNS[a.design % DESIGNS.length],
+        a.subagentType,
+        modelName(a.model),
+        a.effort,
+        (a.rounds ?? 1) > 1 ? `round ${a.rounds}` : undefined,
+        a.isBackground ? 'bg' : undefined,
+      ]
         .filter(Boolean)
         .join(' · ')
       const textW = Math.max(60, W - 84)
@@ -252,30 +327,30 @@ export const register: Register = on => {
       return (
         <Box key={a.id} flexDirection="row" gap={1} alignItems="center">
           {Svg ? (
+            // Only a working crab moves, so only it needs a live frame; the rest draw as images.
             <Svg
               key={`crab-${a.id}-${mood}`}
               source={agentSprite(a.design, mood)}
               alt={`${DESIGNS[a.design % DESIGNS.length]} crab, ${a.status}`}
               width={72}
               height={48}
-              isInteractive
+              isInteractive={mood === 'working' || undefined}
             />
           ) : (
-            <Text>{a.status === 'running' ? '▶' : a.status === 'done' ? '✓' : '✗'}</Text>
+            <Text>{a.status === 'running' ? '▶' : MARK[a.status]}</Text>
           )}
           <Box flexDirection="column" flexGrow={1}>
             <Text weight="semibold" wrap="truncate-end">
-              {a.status === 'done' ? '✓ ' : a.status === 'failed' ? '✗ ' : ''}
+              {MARK[a.status]}
               {a.description}
             </Text>
             <Text dimColor size="caption" wrap="truncate-end">
               {who}
-              {a.isBackground ? ' · bg' : ''}
             </Text>
             {Svg && (
               <Svg
                 key={`bar-${a.id}`}
-                source={barSprite(textW, ctx, a.status === 'failed' ? '#9A9A9A' : '#D97757')}
+                source={barSprite(textW, ctx, a.status === 'running' || a.status === 'done' ? '#D97757' : '#9A9A9A')}
                 alt={`context ${Math.round(ctx * 100)}%`}
                 width={textW}
                 height={6}
@@ -311,9 +386,11 @@ export const register: Register = on => {
             <Text>{m.isWorking ? '⌨' : 'z'}</Text>
           )}
           <Box flexDirection="column" flexGrow={1}>
-            <Text weight="semibold">Main session</Text>
+            <Text weight="semibold" wrap="truncate-end">
+              {m.title ?? 'Main session'}
+            </Text>
             <Text dimColor size="caption">
-              {[modelName(m.model), m.effort].filter(Boolean).join(' · ')}
+              {['Main session', modelName(m.model), m.effort].filter(Boolean).join(' · ')}
             </Text>
             <Text dimColor size="caption" tabular>
               {m.isWorking ? `Working · ${fmtTime(at - m.turnStartedAt)}` : 'Idle'} · {fmtCost(m.costUsd)}
@@ -335,80 +412,62 @@ export const register: Register = on => {
             key="toggle-done"
             plain
             label={`${p.isDoneCollapsed ? '▸' : '▾'} Finished · ${finished.length}`}
-            onPress={() => update($, panel, prev => ({ ...prev, isDoneCollapsed: !prev.isDoneCollapsed }))}
+            onPress={() => updatePanel($, prev => ({ ...prev, isDoneCollapsed: !prev.isDoneCollapsed }))}
           />
         )}
-        {!p.isDoneCollapsed && finished.map(agentRow)}
+        {!p.isDoneCollapsed && shown.map(agentRow)}
+        {!p.isDoneCollapsed && finished.length > FINISHED_SHOWN && (
+          <Button
+            key="toggle-all"
+            plain
+            label={p.showAllDone ? 'Show fewer' : `Show all ${finished.length}`}
+            onPress={() => updatePanel($, prev => ({ ...prev, showAllDone: !prev.showAllDone }))}
+          />
+        )}
       </Box>
     )
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    // No read of `now` here: the band redraws only when work changes, so its shine runs unbroken.
-    const [list, m, p] = await Promise.all([read($, agents), read($, main), read($, panel)])
-    const running = list.filter(a => a.status === 'running')
-    const turn = list.filter(a => a.startedAt >= m.turnStartedAt)
-    const isWorking = e.props.isWorking || m.isWorking || running.length > 0
-    // Once the turn ends, a turn that had subagents stays up as Done until the next one starts.
-    const isDone = !isWorking && turn.length > 0
-    if (e.props.hasSurvey || (!isWorking && !isDone) || p.hiddenTurn === m.turnStartedAt) return next(e)
+    // No read of `now` here: the band redraws only when the work changes, so its shine runs unbroken.
+    const [list, m, p] = await Promise.all([readAgents($), readMain($), readPanel($)])
+    const start = runStart(m)
+    const run = list.filter(a => a.startedAt >= start)
+    const isWorking = e.props.isWorking || m.isWorking || list.some(a => a.status === 'running')
+    // Once nothing works, a run that had subagents stays up as Done until the next one begins.
+    const isDone = !isWorking && run.length > 0
+    if (e.props.hasSurvey || (!isWorking && !isDone) || p.hiddenRun === start) return next(e)
 
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
     const Svg = 'Svg' in ui ? ui.Svg : undefined
 
-    // The bar fills as this turn's subagents finish.
-    const done = turn.filter(a => a.status !== 'running').length
-    const fraction = isDone ? 1 : turn.length > 0 ? done / turn.length : 0
-    const label = isDone ? 'Done' : turn.length > 0 ? `Agents ${done}/${turn.length}` : 'Working'
-    const title = m.title || 'Working'
-    const total = (e.props.bodyColumns || 100) * 8
-    const titleW = Math.min(title.length * 7.5 + 30, 300)
-    const barW = Math.round(Math.max(120, Math.min(640, total - titleW - 170)))
-    const accent = isDone ? '#5BBF8A' : '#8B7CF6'
+    const done = run.filter(a => a.status !== 'running').length
+    const title = m.title ?? 'Working'
+    const percent = run.length > 0 ? Math.round(((isDone ? run.length : done) / run.length) * 100) : 0
+    const state = isDone ? 'done' : run.length > 0 ? `${done} of ${run.length} done, ${percent}%` : 'working'
+    // The dot, title, bar, percent and crab are one drawing, so they share a middle line;
+    // the two buttons sit beside it.
+    const rowW = Math.round(Math.max(260, Math.min(1100, (e.props.bodyColumns || 100) * 8 - 90)))
 
     return (
-      <Box flexDirection="row" gap={1} alignItems="center">
-        <Text color={accent}>●</Text>
-        <Box flexShrink={1}>
-          <Text weight="semibold" wrap="truncate-end">
-            {title}
-          </Text>
-        </Box>
+      <Box flexDirection="row" flexWrap="nowrap" gap={1} alignItems="center">
         {Svg ? (
           <Svg
-            key={`band-bar-${isDone ? 'done' : 'work'}`}
-            source={bandBar(barW, fraction, label, isDone, turn.length)}
-            alt={isDone ? 'Done' : `${label}, ${Math.round(fraction * 100)}%`}
-            width={barW}
-            height={20}
-            isInteractive={!isDone || undefined}
-          />
-        ) : (
-          <Text color={accent}>{label}</Text>
-        )}
-        {turn.length > 0 && (
-          <Text dimColor tabular>
-            {Math.round(fraction * 100)}%
-          </Text>
-        )}
-        {Svg && (
-          <Svg
-            key={`band-crab-${isDone ? 'done' : 'work'}`}
-            source={plainSprite(isDone ? 'done' : 'working')}
-            alt={isDone ? 'Crab resting' : 'Crab working'}
-            width={28}
-            height={20}
+            key={`band-${isDone ? 'done' : 'work'}`}
+            source={bandRow({ width: rowW, title, done, total: run.length, isDone })}
+            alt={`${title}: ${state}`}
+            width={rowW}
+            height={24}
             isInteractive
           />
+        ) : (
+          <Text>
+            {title} · {state}
+          </Text>
         )}
         <Button key="open-agents" plain label={`×${list.length}`} onPress={() => void openPane($)} />
-        <Button
-          key="hide-band"
-          plain
-          label="✕"
-          onPress={() => update($, panel, prev => ({ ...prev, hiddenTurn: m.turnStartedAt }))}
-        />
+        <Button key="hide-band" plain label="✕" onPress={() => updatePanel($, prev => ({ ...prev, hiddenRun: start }))} />
       </Box>
     )
   })
