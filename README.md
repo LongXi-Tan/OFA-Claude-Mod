@@ -13,7 +13,9 @@ My mods for [Claude Code](https://claude.com/claude-code). Each one is a standal
 
 1. Click **+** next to the prompt box, then **Plugins**.
 2. Choose **Add marketplace** and enter `LongXi-Tan/OFA-Claude-Mod`.
-3. Choose **Add plugin**, then **progress-bar**.
+3. Choose **Add plugin**, then the mod: **progress-bar** or **game-studio**.
+
+Already added the marketplace before a mod appeared in it? Refresh it first: `claude plugin marketplace update ofa-claude-mod`.
 
 **Claude Code in a terminal**
 
@@ -21,7 +23,11 @@ My mods for [Claude Code](https://claude.com/claude-code). Each one is a standal
 /plugin install progress-bar --marketplace LongXi-Tan/OFA-Claude-Mod
 ```
 
-Answer `y` to add the marketplace, then press Enter to install it for your user. The mod starts working right away, including in the desktop app's Code tab.
+```
+/plugin install game-studio --marketplace LongXi-Tan/OFA-Claude-Mod
+```
+
+Answer `y` to add the marketplace, then press Enter to install it for your user. A mod starts working right away, including in the desktop app's Code tab; a new session picks up game-studio's skill.
 
 ## Use
 
