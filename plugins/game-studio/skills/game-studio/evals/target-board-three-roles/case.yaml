@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: target-board-three-roles
+expected_outcome: |
+  A plan with three workers (model, hit effect, scoring) on the lead's own model and effort, disjoint owned paths, contracts for the board's size, rings and hit point, parallel Blender work, one Editor user at a time in dependency order, and the lead integrating into the training yard and committing.

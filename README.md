@@ -5,6 +5,7 @@ My mods for [Claude Code](https://claude.com/claude-code). Each one is a standal
 | Mod | What it does |
 | --- | --- |
 | [progress-bar](plugins/progress-bar) | A progress bar above the prompt that fills as Claude's tasks and subagents finish, and an Agents pane of animated pixel crabs with cost, tokens and time. |
+| [game-studio](plugins/game-studio/skills/game-studio/SKILL.md) | A skill that runs a Unity game project (Magical-World) as a small studio: Claude leads, and VFX Artist, 3D Model Artist and Game Programmer workers on its own model and effort build in parallel, taking turns on the one Unity Editor. |
 
 ## Install
 

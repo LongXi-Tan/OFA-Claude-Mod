@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: storm-element-full-team
+expected_outcome: |
+  A plan in which the lead staffs a VFX artist, a 3D model artist and a game programmer as workers on the lead's own model and effort, gives each disjoint owned paths and concrete contracts (rune id, look asset, model part, slot and socket names), lets the modeller start in Blender at once, serializes Editor use with turns ordered by dependency, keeps half-written code out of other agents' compiles, and leaves all commits to the lead.

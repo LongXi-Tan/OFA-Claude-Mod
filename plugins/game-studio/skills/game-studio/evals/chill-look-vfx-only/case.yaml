@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: chill-look-vfx-only
+expected_outcome: |
+  A plan that staffs only the roles the task needs (a VFX artist, perhaps a programmer for a hook, no 3D model artist) on the lead's own model and effort, keeps the Editor to one user at a time, and leaves commits to the lead.
