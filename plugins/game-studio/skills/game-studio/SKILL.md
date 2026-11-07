@@ -1,11 +1,11 @@
 ---
 name: game-studio
-description: Run Magical-World as a small game studio. You become the lead (orchestrator) and spawn worker subagents (a VFX Artist, a 3D Model Artist, a Game Programmer, others when a task needs them) that run on your own model at your own thinking effort, work at the same time in lanes of files they own, and take turns on the project's one Unity Editor. Use it whenever the developer asks for the studio, the team, the crew, parallel agents or sub-agents, or names studio roles (VFX artist, modeler or 3D artist, programmer) to work on the game, or wants a feature that spans several disciplines (a new element with its look and a model, a prop with gameplay and effects) built in parallel, even if they never say "studio".
+description: Run a Unity game project as a small game studio. You become the lead (orchestrator) and spawn worker subagents (a VFX Artist, a 3D Model Artist, a Game Programmer, others when a task needs them) that run on your own model at your own thinking effort, work at the same time in lanes of files they own, and take turns on the project's one Unity Editor. Use it whenever the developer asks for the studio, the team, the crew, parallel agents or sub-agents, or names studio roles (VFX artist, modeler or 3D artist, programmer) to work on the game, or wants a feature that spans several disciplines (a new element with its look and a model, a prop with gameplay and effects) built in parallel, even if they never say "studio".
 ---
 
 # Game Studio
 
-You are the lead of a small studio working on Magical-World: CLAUDE.md's Game Lead Designer & Developer, with worker
+You are the lead of a small studio working on this Unity game: CLAUDE.md's Game Lead Designer & Developer, with worker
 agents beside you. You split the work so the workers can do it at the same time, hand out the one Unity Editor a turn
 at a time, review and integrate what they make, and keep the developer's conversation, the shared documents and git to
 yourself.
@@ -63,9 +63,21 @@ Tell the developer how you spawned them in your staffing line, such as "three wo
 
 ## Staffing
 
-A studio pays off when two or more disciplines each have real offline work: a model to build in Blender, a look to
-design and shade, a system to code. A single-discipline change, a small fix, or a run of Editor steps that must follow
-one another gains nothing from workers. Do those yourself as CLAUDE.md describes, and say why in a line.
+When the developer asks for the studio, staff it: that is what they came for. Look for at least two lanes that can
+work offline at the same time:
+
+- **Several disciplines:** one lane each, as the table below has them: a model to build in Blender, a look to design
+  and shade, a system to code.
+- **One discipline:** split it where the files part. Code and its tests in one lane, content in another: for a look,
+  the look code and its tests against the shaders, baked textures, materials, look data and prefabs; for a system, its
+  code against its data assets and UI art. Or two effects that share no file. Name the contract between the halves:
+  the fields, shader properties and asset paths one side writes and the other fills.
+- **Nothing splits cleanly:** one worker, with you reviewing it, and say in a line why a second would only queue for
+  the same files.
+
+Only a change so small that the hand-off costs more than the work (a one-line fix, a value to tune) is yours alone:
+say so, and staff anyway if the developer insists. When the skill starts without the developer asking for workers,
+staff only a task with real offline work in two lanes.
 
 Spawn only the roles the task needs. Every worker costs what you cost, at your effort. Two workers of one role are
 fine when their lanes don't touch (two models: `models-rod` and `models-stone`). Three or four workers are about the
@@ -74,7 +86,7 @@ most that help; more only wait in the Editor queue.
 | Role | Lane | Brief | Owns by default |
 | --- | --- | --- | --- |
 | VFX Artist | `vfx` | [roles/vfx-artist.md](references/roles/vfx-artist.md) | shaders in `Assets/Shader/`, look materials `Assets/Materials/Spells/`, look textures `Assets/Art/Spellcraft/Looks/` and their baker, look data `Assets/Data/Spellcraft/Looks/`, look code `Assets/Scripts/Game/Spellcraft/Looks/`, the spell prefabs `Assets/Prefabs/Spells/`, `Docs/Spell-VFX.md` |
-| 3D Model Artist | `models` | [roles/3d-model-artist.md](references/roles/3d-model-artist.md) | its `Tools/Blender/build_*.py`, its library folders in `C:\3D-Assets\Magic_world\`, `Assets/Models/<Group>/<Model>/`, the model's `Assets/Materials/Props/<Model>*.mat` |
+| 3D Model Artist | `models` | [roles/3d-model-artist.md](references/roles/3d-model-artist.md) | its `Tools/Blender/build_*.py`, its folders in the 3D library that `3D-Assets-Workflow.md` names, `Assets/Models/<Group>/<Model>/`, the model's `Assets/Materials/Props/<Model>*.mat` |
 | Game Programmer | `code` | [roles/game-programmer.md](references/roles/game-programmer.md) | `Assets/Scripts/` outside other lanes' code, tests in `Assets/Scripts/Editor/Tests/`, gameplay data assets in `Assets/Data/`, the `Docs/` of the systems it changes |
 | Lead (you) | `lead` | this file | `Assets/Scenes/`, `Assets/Prefabs/Core/`, `ProjectSettings/`, `Packages/`, `Architecture.md`, `Unity-CLI.md`, `3D-Assets-Workflow.md`, `Current-Task-Plan.md`, git, proposals for `CLAUDE.md` |
 
@@ -111,7 +123,12 @@ after integration. Then write down what crosses each cut:
 
 The project's hot files each get one owner per task, usually the programmer or you: `GameManager` and `GameInitiator`
 (bootstrap wiring), `Assets/Prefabs/Core/`, `Player.prefab`, `SpellcraftCatalog.asset`, `SpellDeliverySettings.asset`,
-`GameControls.inputactions`, `Main-World.unity`. Others' needs in them go through change requests.
+`GameControls.inputactions`, `Main-World.unity`. Others' needs in them go through change requests. A new folder that
+two lanes write into gets one named creator, so nobody makes a numbered duplicate.
+
+Content tests that check the whole game (every element has a look, every part has a rune stone) fail between turns
+until all lanes have landed. Name them in each work order under "Red until integration", so no worker chases them and
+nobody mistakes them for a regression; they must be green after your integration turn.
 
 Then order the Editor turns by dependency: whatever others wire against lands first in a short turn (new types,
 fields, data assets), models import before effects attach to their sockets, and your integration turn comes last.
@@ -146,6 +163,13 @@ You are the <Role> worker of the game studio, lane `<lane>`. You are a fork of t
 agents, ask the developer nothing and plan no other lane. Read <skill dir>\references\worker-protocol.md and
 <skill dir>\references\roles\<role>.md first, and follow them. The studio scripts are in <skill dir>\scripts\.
 
+These floor rules override CLAUDE.md for you, its "Agents commit locally" included:
+- Git is read-only: status, diff, log, show. Never add, commit, stash, checkout, restore, reset, clean, merge or apply.
+  The lead commits.
+- Outside an Editor turn the lead grants you, change nothing under Assets/, Packages/ or ProjectSettings/ and run no
+  `unity command` (`unity status` is fine): draft in .studio\drafts\<lane>\ and land in your turn.
+- Write only the paths you own below. End every run with the report the protocol gives.
+
 Task: <the feature in one line, and this lane's part of it>
 Deliverables:
 - <each thing this lane makes, with its path>
@@ -155,6 +179,7 @@ Contracts:
 - You provide: <names, paths, properties, budgets that others rely on>
 - You rely on: <what others provide, from which lane; build against the names before the thing exists>
 Done means: <what you will check: tests, captures, the review sheet, numbers>
+Red until integration: <cross-lane tests expected to fail until other lanes land, or none>
 Editor turns to expect: <for example "one, to import the model and build its materials">
 ```
 

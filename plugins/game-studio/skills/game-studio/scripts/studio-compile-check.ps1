@@ -165,8 +165,27 @@ if ($exitCode -eq 0 -and $errors.Count -eq 0) {
 
 Write-Output "COMPILE CHECK FAILED: $scope; $($errors.Count) errors, $($warnings.Count) warnings, ${seconds}s."
 if ($errors.Count -gt 0) {
-    $errors | Select-Object -First 60 | ForEach-Object { Write-Output "  $_" }
+    # Each error is either in a lane's draft or in a project file under Assets\. While another lane holds the Editor,
+    # its files there can be mid-change, so a project error may be theirs, not yours.
+    $draftsMarker = '\.studio\drafts\'
+    $draftErrors = 0
+    $labelled = @()
+    foreach ($message in $errors) {
+        $at = $message.IndexOf($draftsMarker, [System.StringComparison]::OrdinalIgnoreCase)
+        if ($at -ge 0) {
+            $draftLane = ($message.Substring($at + $draftsMarker.Length) -split '\\')[0]
+            $labelled += "[draft $draftLane] $message"
+            $draftErrors++
+        }
+        else { $labelled += "[project] $message" }
+    }
+    $projectErrors = $errors.Count - $draftErrors
+    Write-Output "  $draftErrors in drafts, $projectErrors in project files."
+    $labelled | Select-Object -First 60 | ForEach-Object { Write-Output "  $_" }
     if ($errors.Count -gt 60) { Write-Output "  ... $($errors.Count - 60) more" }
+    if ($draftErrors -eq 0) {
+        Write-Output '  Your drafts compiled; every error is in a project file. If another lane holds the Editor, its files may be mid-change: check again after its turn, and report only errors that stay.'
+    }
 }
 else {
     # dotnet failed without compiler errors (restore, SDK or project trouble): show its own words.

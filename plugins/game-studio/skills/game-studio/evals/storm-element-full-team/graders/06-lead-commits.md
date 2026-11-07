@@ -4,4 +4,4 @@ focus: trace
 weight: 1
 ---
 
-plan.md has workers make no git commits or other git writes; the lead alone commits.
+Every worker's prompt in plan.md itself forbids git writes (commit, add, stash, checkout and the like), overriding CLAUDE.md's "Agents commit locally"; the lead alone commits.

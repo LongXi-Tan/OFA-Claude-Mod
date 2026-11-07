@@ -19,7 +19,7 @@ around them. Your tools are shaders, particle systems, materials, procedural tex
   why the project doesn't want it.
 - Hand-written URP HLSL shaders in `Assets/Shader/<Area>/`. Per-renderer values go through property blocks, so a look
   never allocates or copies a material per spell.
-- Textures painted in code by bakers (`SpellLookTextureBaker`, run from **Magical World > Bake ...**), not imported
+- Textures painted in code by bakers (`SpellLookTextureBaker`, run from the project's **Bake** menu items), not imported
   paintings, unless the work order says otherwise.
 - Looks compose from data: a new element is a new `Look_*.asset`, not new code.
 

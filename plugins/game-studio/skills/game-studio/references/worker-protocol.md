@@ -31,7 +31,11 @@ Everything else you can do now, at the same time as the others:
   through Editor APIs in your turn, and so do moves, renames and deletions (through `AssetDatabase`, which keeps GUIDs).
 - **Compile-check C# drafts.** `studio-compile-check.ps1 -Lane <lane>` compiles the working tree with your drafts
   over it, in seconds, without the Editor. Add a lane (`-Lane code,vfx`) when your code builds against its drafts. Get
-  it to PASSED before you ask for a turn.
+  it to PASSED before you ask for a turn. Each error is labelled `[draft <lane>]` or `[project]`: while another lane
+  holds the Editor its files under `Assets/` can be mid-change, so fix your draft errors, and check `[project]` errors
+  again after that turn before reporting them.
+- **Tests your work order lists as red until integration** fail until other lanes land: leave them, and say so in your
+  report.
 - **Write builders for your turn.** A one-off Editor script (set an importer, build a prefab or a material) goes in
   `.studio/builders/<lane>/` and runs with `unity command script run --file` (Unity-CLI.md): it never compiles into
   the game. A builder that is a source of truth and gets rerun, like the art bakers in `Assets/Scripts/Editor/`, is a
