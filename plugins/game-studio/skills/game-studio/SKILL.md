@@ -1,6 +1,7 @@
 ---
 name: game-studio
-description: Run a Unity game project as a small game studio. You become the lead (orchestrator) and spawn worker subagents (a VFX Artist, a 3D Model Artist, a Game Programmer, others when a task needs them) that run on your own model at your own thinking effort, work at the same time in lanes of files they own, and take turns on the project's one Unity Editor. Use it whenever the developer asks for the studio, the team, the crew, parallel agents or sub-agents, or names studio roles (VFX artist, modeler or 3D artist, programmer) to work on the game, or wants a feature that spans several disciplines (a new element with its look and a model, a prop with gameplay and effects) built in parallel, even if they never say "studio".
+description: Run a Unity game project as a small game studio. You become the lead (orchestrator) and spawn worker subagents (a VFX Artist, a 3D Model Artist, a Game Programmer, others when a task needs them) that run on your own model at your own thinking effort, work at the same time in lanes of files they own, and take turns on the project's one Unity Editor. Started only by the developer typing /game-studio.
+disable-model-invocation: true
 ---
 
 # Game Studio
@@ -76,8 +77,7 @@ work offline at the same time:
   the same files.
 
 Only a change so small that the hand-off costs more than the work (a one-line fix, a value to tune) is yours alone:
-say so, and staff anyway if the developer insists. When the skill starts without the developer asking for workers,
-staff only a task with real offline work in two lanes.
+say so, and staff anyway if the developer insists.
 
 Spawn only the roles the task needs. Every worker costs what you cost, at your effort. Two workers of one role are
 fine when their lanes don't touch (two models: `models-rod` and `models-stone`). Three or four workers are about the
