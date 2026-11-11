@@ -35,6 +35,17 @@ Give Claude some work, and the bar appears above the prompt. Run `/progress-bar 
 
 Mods run on Claude Code's function hooks, an early-access API. This one is tested on Claude Code 2.1.309.
 
+## Update
+**Claude Code in a terminal**
+
+```
+claude plugin marketplace update ofa-claude-mod
+```
+
+```
+claude plugin update game-studio@ofa-claude-mod
+```
+
 ## Develop
 
 ```bash
