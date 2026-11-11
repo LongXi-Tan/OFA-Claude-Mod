@@ -1,6 +1,6 @@
 {
   "name": "progress-bar",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "A progress bar above the prompt that fills as Claude's tasks and subagents finish, and an Agents pane where every subagent works as an animated pixel crab, with cost, tokens and time",
   "author": { "name": "LongXi-Tan" },
   "license": "MIT",

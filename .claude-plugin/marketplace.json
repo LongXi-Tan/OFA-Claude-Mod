@@ -7,7 +7,7 @@
       "name": "progress-bar",
       "source": "./plugins/progress-bar",
       "description": "Mod: a progress bar above the prompt that fills as Claude's tasks and subagents finish, and an Agents pane of animated pixel crabs with cost, tokens and time.",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "category": "mod"
     },
     {
