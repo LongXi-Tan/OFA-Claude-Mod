@@ -31,13 +31,13 @@ try {
 }
 catch { $instance = $null }
 if (-not $instance) {
-    Write-Output "EDITOR UNREACHABLE: no Unity Editor reports $repo. Is it open? (unity status --format json; Unity-CLI.md, Connection)"
+    Write-Output "EDITOR UNREACHABLE: no Unity Editor reports $repo. Is it open on this folder? (unity status --format json)"
     exit 2
 }
 
 $editor = Invoke-UnityJson $repo @('editor', 'status')
 if (-not $editor) {
-    Write-Output "EDITOR UNREACHABLE: the Editor for $repo does not answer (a domain reload, a modal dialog, or Safe Mode). Retry in a moment; if it persists, see Unity-CLI.md (Tests: the modal dialog; Compiling: Safe Mode)."
+    Write-Output "EDITOR UNREACHABLE: the Editor for $repo does not answer (a domain reload, a modal dialog, or Safe Mode). Retry in a moment; if it persists, look at the Editor window for a modal dialog or the Safe Mode prompt."
     exit 2
 }
 $console = Invoke-UnityJson $repo @('console', 'status')
@@ -68,7 +68,7 @@ else {
         if ($unsaved.openPrefabDirty) { $state = 'open with unsaved changes' }
         $problems += "Prefab Mode has $($unsaved.openPrefab) $state. Builders edit prefabs with LoadPrefabContents and leave Prefab Mode closed."
     }
-    if ($unsaved.recoveryFolder) { $problems += 'Assets/_Recovery exists: look inside before deleting it; it may hold the developer''s unsaved scene (Unity-CLI.md, Tests).' }
+    if ($unsaved.recoveryFolder) { $problems += 'Assets/_Recovery exists: look inside before deleting it; it may hold the developer''s unsaved scene.' }
 }
 
 $errorsNote = ''

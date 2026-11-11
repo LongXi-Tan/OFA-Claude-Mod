@@ -1,7 +1,7 @@
 {
   "name": "game-studio",
-  "version": "0.2.1",
-  "description": "Run a Unity game project as a small studio: the lead spawns VFX Artist, 3D Model Artist and Game Programmer workers on its own model and effort, working in parallel in owned lanes and taking turns on the one Unity Editor",
+  "version": "0.3.0",
+  "description": "Run any Unity game project as a small studio: the lead spawns VFX Artist, 3D Model Artist and Game Programmer workers on its own model and effort, working in parallel in owned lanes and taking turns on the one Unity Editor",
   "author": { "name": "LongXi-Tan" },
   "license": "MIT"
 }

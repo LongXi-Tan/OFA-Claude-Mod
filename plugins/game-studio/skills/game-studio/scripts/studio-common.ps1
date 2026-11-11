@@ -4,28 +4,65 @@
 # Lane names: lowercase letters, digits and hyphens, as the work orders name them (code, vfx, models, lead, models-2).
 $script:LanePattern = '^[a-z0-9][a-z0-9-]*$'
 
-# Extensions Unity serializes itself. They change only through Editor APIs during an Editor turn, never as drafts
-# (CLAUDE.md: never edit Unity YAML by hand).
+# Extensions Unity serializes itself, or that reshape the compile (.asmdef, .asmref). They change only through Editor
+# APIs during an Editor turn, never as drafts: Unity YAML is not edited by hand.
 $script:EditorOnlyExtensions = @(
+    '.asmdef', '.asmref',
     '.meta', '.unity', '.prefab', '.asset', '.mat', '.controller', '.overridecontroller', '.anim', '.mask',
     '.physicmaterial', '.physicsmaterial2d', '.lighting', '.rendertexture', '.cubemap', '.flare', '.guiskin',
     '.fontsettings', '.mixer', '.playable', '.signal', '.preset', '.spriteatlas', '.spriteatlasv2', '.terrainlayer',
     '.brush', '.shadergraph', '.shadersubgraph', '.vfx', '.vfxoperator', '.vfxblock', '.inputactions'
 )
 
+function Test-UnityProjectRoot([string] $Path) {
+    return (Test-Path (Join-Path $Path 'Assets')) -and (Test-Path (Join-Path $Path 'ProjectSettings'))
+}
+
+# The Unity project root (the folder with Assets\ and ProjectSettings\). The scripts live in a plugin, outside the
+# game, so the project is where the caller stands: the current folder, else the git repository's top folder.
 function Get-StudioRepo {
+    $here = ((Get-Location).Path -replace '/', '\').TrimEnd('\')
+    if (Test-UnityProjectRoot $here) { return $here }
     $top = $null
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try { $top = (& git rev-parse --show-toplevel 2>$null) } catch { $top = $null }
     $ErrorActionPreference = $previous
-    # The scripts live in a plugin, outside the game: the game is the repository the caller stands in.
-    if (-not $top) { $top = (Get-Location).Path }
-    $top = ([string]$top -replace '/', '\').TrimEnd('\')
-    if (-not (Test-Path (Join-Path $top 'Assets')) -or -not (Test-Path (Join-Path $top 'ProjectSettings'))) {
-        throw "Not a Unity project root: $top. Run the studio scripts from the game repository's root."
+    if ($top) {
+        $top = ([string]$top -replace '/', '\').TrimEnd('\')
+        if (Test-UnityProjectRoot $top) { return $top }
     }
-    return $top
+    throw "Not a Unity project root: $here. Run the studio scripts from the Unity project's root, the folder with Assets\ and ProjectSettings\."
+}
+
+# Keeps .studio\ out of git status without touching the repository's tracked .gitignore: adds it to the local
+# .git\info\exclude. Quietly does nothing outside a git repository.
+function Register-StudioIgnore([string] $Repo) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $gitDir = (& git -C $Repo rev-parse --git-common-dir 2>$null)
+        $top = (& git -C $Repo rev-parse --show-toplevel 2>$null)
+    }
+    catch { $gitDir = $null; $top = $null }
+    $ErrorActionPreference = $previous
+    if (-not $gitDir -or -not $top) { return }
+    $gitDir = [string]$gitDir -replace '/', '\'
+    if (-not [System.IO.Path]::IsPathRooted($gitDir)) { $gitDir = Join-Path $Repo $gitDir }
+    $top = ([string]$top -replace '/', '\').TrimEnd('\')
+
+    # The pattern is relative to the repository's top, which may sit above the Unity project.
+    $prefix = ''
+    if ($Repo.Length -gt $top.Length -and $Repo.StartsWith($top + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $prefix = ($Repo.Substring($top.Length + 1) -replace '\\', '/') + '/'
+    }
+    $pattern = "/$prefix.studio/"
+    $exclude = Join-Path $gitDir 'info\exclude'
+    if (Test-Path $exclude) {
+        foreach ($line in (Get-Content -Path $exclude)) { if ($line.Trim() -eq $pattern) { return } }
+    }
+    else { New-Item -ItemType Directory -Force -Path (Split-Path $exclude) | Out-Null }
+    Add-Content -Path $exclude -Value $pattern -Encoding ASCII
 }
 
 function Assert-LaneName([string] $Name) {
@@ -70,7 +107,7 @@ function Test-UnityIgnored([string] $RelativePath) {
     return $RelativePath.EndsWith('.tmp', [System.StringComparison]::OrdinalIgnoreCase)
 }
 
-# A script in any folder named Editor compiles into Assembly-CSharp-Editor (the project has no asmdefs and no Plugins).
+# Is the file inside a folder named Editor? Outside an asmdef, such a script compiles into an editor assembly.
 function Test-EditorScript([string] $RelativePath) {
     $parts = $RelativePath -split '\\'
     for ($i = 0; $i -lt $parts.Length - 1; $i++) {
@@ -129,7 +166,7 @@ function Test-DraftablePath([string] $RelativePath) {
     $isProjectPath = $RelativePath.StartsWith('Assets\', [System.StringComparison]::OrdinalIgnoreCase) -or
         $RelativePath.StartsWith('Packages\', [System.StringComparison]::OrdinalIgnoreCase)
     if (-not $isProjectPath) {
-        return "only files under Assets\ or Packages\ are drafted; write other files (Docs, Tools\Blender) in place"
+        return "only files under Assets\ or Packages\ are drafted; write other files (docs, Blender scripts, source art) in place"
     }
     $extension = [System.IO.Path]::GetExtension($RelativePath).ToLowerInvariant()
     if ($script:EditorOnlyExtensions -contains $extension) {

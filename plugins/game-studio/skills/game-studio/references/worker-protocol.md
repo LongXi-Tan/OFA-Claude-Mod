@@ -2,11 +2,12 @@
 
 You are a worker in the game studio: a fork of the lead, with one lane. This is how you work beside the other workers
 without breaking their work. The lead's SKILL.md explains why the floor works this way, your work order says what to
-make, and your role brief says how your discipline does it in this project. CLAUDE.md and the project's documents
-apply to you in full. Skip reading anything that is already in your context from the lead.
+make, and your role brief says how your discipline does it. The project's own instructions (CLAUDE.md, its documents
+and conventions) apply to you in full, except where the floor rules in your work order override them. Skip reading
+anything that is already in your context from the lead.
 
 The studio scripts named below (`studio-drafts.ps1`, `studio-compile-check.ps1`, `studio-editor-check.ps1`) are in the
-skill's `scripts\` folder, whose full path your work order gives. Run them from the game repository's root.
+skill's `scripts\` folder, whose full path your work order gives. Run them from the Unity project's root.
 
 ## Your lane
 
@@ -27,21 +28,22 @@ Everything else you can do now, at the same time as the others:
 
 - **Draft project files.** `studio-drafts.ps1 -Lane <lane> -Open <path>` copies an existing file to
   `.studio/drafts/<lane>/<path>`; edit that copy. Write a new file straight to `.studio/drafts/<lane>/<path>`. Only
-  text sources are drafted (C#, `.shader`, `.hlsl`). Scenes, prefabs, materials, `.asset` and `.meta` files change
-  through Editor APIs in your turn, and so do moves, renames and deletions (through `AssetDatabase`, which keeps GUIDs).
+  text sources are drafted (C#, `.shader`, `.hlsl`, `.cginc`, `.uss`, `.uxml`, ...). Scenes, prefabs, materials,
+  `.asset`, `.asmdef` and `.asmref`, and `.meta` files change through Editor APIs in your turn, and so do moves,
+  renames and deletions (through `AssetDatabase`, which keeps GUIDs).
 - **Compile-check C# drafts.** `studio-compile-check.ps1 -Lane <lane>` compiles the working tree with your drafts
   over it, in seconds, without the Editor. Add a lane (`-Lane code,vfx`) when your code builds against its drafts. Get
   it to PASSED before you ask for a turn. Each error is labelled `[draft <lane>]` or `[project]`: while another lane
   holds the Editor its files under `Assets/` can be mid-change, so fix your draft errors, and check `[project]` errors
-  again after that turn before reporting them.
+  again after that turn before reporting them. If it reports UNAVAILABLE (no .NET SDK, or Unity has not generated the
+  `.csproj` files), the Editor's compile in your turn is the check: say so in your report.
 - **Tests your work order lists as red until integration** fail until other lanes land: leave them, and say so in your
   report.
 - **Write builders for your turn.** A one-off Editor script (set an importer, build a prefab or a material) goes in
-  `.studio/builders/<lane>/` and runs with `unity command script run --file` (Unity-CLI.md): it never compiles into
-  the game. A builder that is a source of truth and gets rerun, like the art bakers in `Assets/Scripts/Editor/`, is a
-  project file: draft it.
-- **Files outside the Unity project** (your lane's `Docs/` pages, `Tools/Blender/`, the 3D library): write them in
-  place.
+  `.studio/builders/<lane>/` and runs with `unity command script run --file`: it never compiles into the game. A
+  builder that is a source of truth and gets rerun (a texture baker, a content generator kept in an `Editor` folder)
+  is a project file: draft it.
+- **Files outside the Unity project** (your lane's docs, Blender scripts, source art): write them in place.
 - **Blender builds:** run them headless whenever you like. Each is its own process.
 
 Write captures and review pictures to `.studio/captures/<lane>/` and give their paths in your reports, so the lead
@@ -59,12 +61,12 @@ with the Editor clean.
 
 1. Run `studio-editor-check.ps1` and expect EDITOR FREE. If it is not free, report BLOCKED with its output, and fix
    nothing that is not yours.
-2. `studio-drafts.ps1 -Lane <lane> -Land`, then `AssetDatabase.Refresh()`, wait for the compile and read its errors
-   (Unity-CLI.md, Compiling). If landing is refused, someone changed a path of yours: report it rather than forcing
-   it.
-3. Do the Editor work as Unity-CLI.md describes, on your lane's assets only. Save what you changed with
-   `AssetDatabase.SaveAssetIfDirty(asset)`, never `AssetDatabase.SaveAssets()`, which writes everyone's unsaved changes.
-   Build in preview scenes, and never dirty or save a scene your work order doesn't give you.
+2. `studio-drafts.ps1 -Lane <lane> -Land`, then `AssetDatabase.Refresh()`, wait for the compile to finish and read its
+   errors from the Console. If landing is refused, someone changed a path of yours: report it rather than forcing it.
+3. Do the Editor work on your lane's assets only, from builders and `unity command` calls (the `unity:unity-cli` skill
+   covers the CLI when it is installed). Save what you changed with `AssetDatabase.SaveAssetIfDirty(asset)`, never
+   `AssetDatabase.SaveAssets()`, which writes everyone's unsaved changes. Build in preview scenes, and never dirty or
+   save a scene your work order doesn't give you.
 4. Check what you made: the tests your change touches, captures (never bring the Editor to the front), numbers.
 5. Leave it clean: Play Mode stopped, the Run In Background override off, nothing unsaved, the compile clean,
    temporary folders deleted, the Console errors you caused fixed. Run `studio-editor-check.ps1` again: EDITOR FREE.
@@ -86,7 +88,7 @@ NEXT: <EDITOR REQUEST: the turn's steps and a rough length. Otherwise: what is l
 NEEDS: <what you wait for, and from which lane, or none>
 CHANGE REQUESTS: <edits you need in paths you don't own, or none>
 CONTRACT: <names others build against that changed or now exist, or unchanged>
-LESSONS: <surprises worth a line in Unity-CLI.md or another shared document, or none>
+LESSONS: <surprises worth a line in the project's shared notes, or none>
 ```
 
 For a question you can work around, send it to the lead with SendMessage to `main` and keep working. When you cannot
@@ -94,6 +96,6 @@ go on, report BLOCKED.
 
 ## Documents
 
-Update your lane's documents with your change (CLAUDE.md, Documentation). The shared documents (`Architecture.md`,
-`Unity-CLI.md`, `3D-Assets-Workflow.md`, unless your work order gives you one) are the lead's: put what they need
-under LESSONS or CONTRACT.
+Keep your lane's documents up to date with your change, as the project's conventions ask. The shared documents (the
+architecture overview, the task plan, workflow notes, unless your work order gives you one) are the lead's: put what
+they need under LESSONS or CONTRACT.

@@ -4,8 +4,8 @@
   during the worker's own Editor turn.
 
 .DESCRIPTION
-  Drafts live in .studio\drafts\<lane>\ at their repository paths (.studio\drafts\code\Assets\Scripts\Game\X.cs lands
-  as Assets\Scripts\Game\X.cs). A new file is written straight into the drafts tree. An existing file is opened first,
+  Drafts live in .studio\drafts\<lane>\ at their repository paths (.studio\drafts\code\Assets\Scripts\Player\X.cs lands
+  as Assets\Scripts\Player\X.cs). A new file is written straight into the drafts tree. An existing file is opened first,
   which copies it there and remembers its content hash, so landing can tell whether anyone changed it meanwhile.
   Landing checks every draft before copying any: one conflict and nothing lands.
 
@@ -29,7 +29,7 @@
   Deletes the lane's drafts without landing them.
 
 .EXAMPLE
-  powershell -NoProfile -File <skill dir>\scripts\studio-drafts.ps1 -Lane code -Open Assets\Scripts\Game\Combat\Damageable.cs
+  powershell -NoProfile -File <skill dir>\scripts\studio-drafts.ps1 -Lane code -Open Assets\Scripts\Player\PlayerHealth.cs
 #>
 param(
     [string] $Lane,
@@ -52,7 +52,7 @@ if ($actionCount -ne 1) {
     Write-Output 'Give one action: -Open <paths>, -Status, -Land or -Discard (with -Lane <lane>).'
     exit 2
 }
-if (-not $Status) { Assert-LaneName $Lane }
+if (-not $Status) { Assert-LaneName $Lane; Register-StudioIgnore $repo }
 elseif ($Lane) { Assert-LaneName $Lane }
 
 $draftsRoot = Get-StudioDir $repo 'drafts'
@@ -161,5 +161,5 @@ Write-LaneBases $repo $Lane @{}
 $unchanged = @($plan | Where-Object { $_.Kind -eq 'unchanged' }).Count
 Write-Output "LANDED $($landed.Count) files from lane $Lane ($unchanged unchanged drafts dropped):"
 $landed | ForEach-Object { Write-Output $_ }
-Write-Output 'Next, in the Editor: AssetDatabase.Refresh(), wait for the compile and read its errors (Unity-CLI.md, Compiling).'
+Write-Output 'Next, in the Editor: AssetDatabase.Refresh(), wait for the compile to finish and read its errors in the Console.'
 exit 0

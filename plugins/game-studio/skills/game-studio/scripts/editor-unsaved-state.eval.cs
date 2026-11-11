@@ -1,5 +1,5 @@
 // Read-only: what the Editor holds unsaved, for studio-editor-check.ps1 (unity command script eval --file).
-// A statement block ending in return, with no using lines, as script eval wants (Unity-CLI.md).
+// A statement block ending in return, with no using lines, as unity command script eval wants.
 var dirtyScenes = new System.Collections.Generic.List<string>();
 for (int i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
 {
