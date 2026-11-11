@@ -8,7 +8,6 @@
 import { SCENE_BODY, SCENE_FPS, SCENE_POSES, SCENE_SEQUENCE, SCENE_TYPING } from './scene'
 
 const BODY = '#D97757'
-const GREY = '#9A9A9A'
 const EYE = '#1A1A1A'
 
 const r = (x: number, y: number, w: number, h: number, fill: string, cls = '') =>
@@ -46,7 +45,7 @@ const BASE_CSS = `
 .still,.still *{animation:none!important}
 `
 
-/** `stopped`: interrupted; `failed`: ended on an error. Both grey, eyes shut flat. */
+/** `stopped`: interrupted; `failed`: ended on an error. Both keep their colour, eyes shut flat. */
 export type CrabMood = 'working' | 'done' | 'failed' | 'stopped'
 
 // ---- Which crab a subagent gets ---------------------------------------------------
@@ -224,8 +223,6 @@ const COSTUMES: Record<(typeof DESIGNS)[number], { eyes: Eyes; gear: string; sid
 const moodEyes = (mood: CrabMood, working: Eyes): Eyes =>
   mood === 'done' ? 'happy' : mood === 'failed' || mood === 'stopped' ? 'flat' : working
 
-const moodBody = (mood: CrabMood) => (mood === 'failed' || mood === 'stopped' ? GREY : BODY)
-
 /**
  * One subagent's crab, 36x25 units from y=-1: hopping while it works, resting once it ends.
  * The row above 0 is headroom, so a hat or sword at the top edge stays whole mid-hop.
@@ -233,7 +230,7 @@ const moodBody = (mood: CrabMood) => (mood === 'failed' || mood === 'stopped' ? 
 export const agentSprite = (design: number, mood: CrabMood): string => {
   const c = COSTUMES[DESIGNS[design % DESIGNS.length] ?? FALLBACK]
   const isHopping = mood === 'working'
-  const inner = (c.side ?? '') + crab(10, 7, moodBody(mood), moodEyes(mood, c.eyes), isHopping, c.gear)
+  const inner = (c.side ?? '') + crab(10, 7, BODY, moodEyes(mood, c.eyes), isHopping, c.gear)
 
   return svg(36, 25, BASE_CSS, `<g class="${isHopping ? 'walk' : 'still'}">${inner}</g>`, -1)
 }

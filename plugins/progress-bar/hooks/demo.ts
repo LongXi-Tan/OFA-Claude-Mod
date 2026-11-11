@@ -1,5 +1,5 @@
 // The free demo: one fake subagent per design, spawned 1.5s apart, each running for a
-// while with its numbers climbing; the 3D Modeler fails so the grey crab shows too. No model
+// while with its numbers climbing; the 3D Modeler fails so the flat-eyed crab shows too. No model
 // is called. A real run that starts meanwhile takes over: the demo's timers stand down.
 
 import type { EngineInterface } from 'claude-code'
