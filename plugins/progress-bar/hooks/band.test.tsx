@@ -13,6 +13,7 @@ const BAND = {
   surface: 'desktop',
   props: {
     hasSurvey: false,
+    isCollapsed: false,
     isWorking: false,
     maxRows: 10,
     bodyColumns: 120,
@@ -47,11 +48,12 @@ test('the demo moves the band one step per finished task, then turns it Done', a
   await ui.unmount()
 
   // Every agent that joins or finishes moves the band; the run ends Done.
-  const run = (s: string) => `Demo: six crabs at work: ${s}`
+  const run = (s: string) => `Demo: seven crabs at work: ${s}`
   expect(seen[0]).toBe(run('working'))
+  // The first crab finishes as the seventh joins, so the band never shows 0 of 7.
   expect(seen).toContain(run('0 of 6 done, 0%'))
-  for (const [n, pct] of [[1, 17], [2, 33], [3, 50], [4, 67], [5, 83], [6, 100]]) {
-    expect(seen).toContain(run(`${n} of 6 done, ${pct}%`))
+  for (const [n, pct] of [[1, 14], [2, 29], [3, 43], [4, 57], [5, 71], [6, 86], [7, 100]]) {
+    expect(seen).toContain(run(`${n} of 7 done, ${pct}%`))
   }
   expect(seen.at(-1)).toBe(run('done'))
 })

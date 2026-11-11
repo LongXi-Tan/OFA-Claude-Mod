@@ -10,7 +10,7 @@ const band = (isWorking: boolean, surface: (typeof SURFACES)[number] = 'desktop'
     plugin: 'progress-bar',
     component: 'AbovePrompt',
     surface,
-    props: { hasSurvey: false, isWorking, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+    props: { hasSurvey: false, isCollapsed: false, isWorking, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 10 }, view: {} },
   }) as const
 
 const PANE = {
@@ -632,7 +632,7 @@ test('/progress-bar clear removes a finished demo and its band', async ($, on) =
   await start($)
   await command($, 'demo')
   await clock.advance(25_000)
-  expect(await bandAlt($, false)).toBe('Demo: six crabs at work: done')
+  expect(await bandAlt($, false)).toBe('Demo: seven crabs at work: done')
 
   expect((await command($, 'clear')).text).toBe('Demo cleared.')
   expect(await bandAlt($, false)).toBeUndefined()
@@ -695,7 +695,7 @@ test('a dropped prompt during the demo leaves the demo to finish, not stuck work
   await say($, 'Blocked by policy')
   await clock.settle()
   await clock.advance(30_000)
-  expect(await bandAlt($, false)).toBe('Demo: six crabs at work: done')
+  expect(await bandAlt($, false)).toBe('Demo: seven crabs at work: done')
 })
 
 test('/progress-bar clear puts back the run the demo took the band from', async ($, on) => {

@@ -9,7 +9,7 @@ export type AgentRow = {
   subagentType: string
   model: string
   effort?: string
-  /** Which crab costume it wears, an index into DESIGNS. */
+  /** Which crab costume it wears, an index into DESIGNS, picked from the words of its spawn. */
   design: number
   status: AgentStatus
   isBackground: boolean

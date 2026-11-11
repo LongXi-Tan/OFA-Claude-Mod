@@ -49,10 +49,75 @@ const BASE_CSS = `
 /** `stopped`: interrupted; `failed`: ended on an error. Both grey. */
 export type CrabMood = 'working' | 'done' | 'failed' | 'stopped'
 
-/** The designs a subagent can get, in the order they are handed out. */
-export const DESIGNS = ['Wizard', 'Pirate', 'Ninja', 'Knight', 'Musician', 'Painter'] as const
+// ---- Which crab a subagent gets ---------------------------------------------------
+//
+// Read from the words of its spawn alone: its short description, its name, its agent type
+// and the opening of its prompt. Nothing has to tell the mod a role, so any skill, team or
+// plain request gets a fitting crab: "VFX Artist: explosion look" the VFX crab, "Fix the
+// login bug" the programmer, and work no role claims the Wizard.
 
-type Eyes = 'open' | 'happy' | 'x' | 'flat' | 'left-only' | 'ninja'
+/** The crabs, in priority order: a tie between roles goes to the earlier one. */
+export const DESIGNS = ['VFX Artist', '3D Modeler', 'Musician', 'Programmer', 'Painter', 'Explorer', 'Wizard'] as const
+export type Design = (typeof DESIGNS)[number]
+
+/** The crab for work no role claims. */
+export const FALLBACK = 'Wizard' satisfies Design
+
+/** The crabs a role's words can claim: every design but the fallback. */
+type Role = Exclude<Design, typeof FALLBACK>
+const ROLES = DESIGNS.filter((d): d is Role => d !== FALLBACK)
+
+// Whole words only, so "art" never matches "artist" or "start". Each hit scores.
+const ROLE_WORDS: Record<Role, RegExp> = {
+  'VFX Artist':
+    /\b(vfx|fx|visual effects?|effects?|particles?|shaders?|explosions?|glows?|bloom|post-?process\w*|trails?|sparks?|impacts?|looks?-?dev|auras?|lightning|fire|smoke)\b/gi,
+  '3D Modeler':
+    /\b(3d|3-d|modell?ers?|modell?ing|model artist|blender|meshe?s?|fbx|gltf|sculpt\w*|low-?poly|rigg?(ing|ed)?|uvs?|topology|retopo\w*)\b/gi,
+  Musician: /\b(audio|sounds?|sfx|music\w*|songs?|soundtracks?|melod\w*|voice-?overs?|ambien\w*|composers?|mix(ing|er)?)\b/gi,
+  Programmer:
+    /\b(code|coding|coders?|program(mer|ming)?s?|implement\w*|refactor\w*|fix(es|ing)?|bugs?|debug\w*|tests?|testing|scripts?|functions?|apis?|endpoints?|compil\w*|types?cript|python|rust|components?|systems?|classes?|methods?|backend|frontend|migrations?)\b/gi,
+  Painter:
+    /\b(art|artists?|paint\w*|textures?|sprites?|icons?|illustrat\w*|colou?rs?|palettes?|mock-?ups?|logos?|draw\w*|pixel-?art|concept|ui design|styles?|css|themes?)\b/gi,
+  Explorer:
+    /\b(explore\w*|search\w*|find\w*|locate|scout\w*|survey\w*|research\w*|investigat\w*|audit\w*|review\w*|read\w*|understand\w*|trace|look (up|into|for)|map(ping)? the|where|which)\b/gi,
+}
+
+// Agent types that name the role outright.
+const ROLE_TYPES: Record<string, Design> = {
+  explore: 'Explorer',
+  'claude-code-guide': 'Explorer',
+  'web-fetch': 'Explorer',
+}
+
+const roleHits = (text: string, re: RegExp) => (text ? (text.match(re) ?? []).length : 0)
+
+/** A prompt's first sentence, where a brief says who the agent is ("You are the VFX Artist worker…"). */
+const opening = (prompt: string) => (prompt.split(/(?<=[.!?\n])\s/, 1)[0] ?? '').slice(0, 240)
+
+export type SpawnWords = { description?: string; name?: string; subagentType?: string; prompt?: string }
+
+/** The crab for a spawn: the role its words name most, the description and name counting double. */
+export function designFor(words: SpawnWords): Design {
+  const title = `${words.description ?? ''} ${words.name ?? ''}`
+  const lead = opening(words.prompt ?? '')
+  const typed = ROLE_TYPES[(words.subagentType ?? '').toLowerCase()]
+  let best: Design = FALLBACK
+  let bestScore = 0
+  for (const design of ROLES) {
+    const re = ROLE_WORDS[design]
+    const score = roleHits(title, re) * 2 + roleHits(lead, re) + (typed === design ? 2 : 0)
+    if (score > bestScore) {
+      best = design
+      bestScore = score
+    }
+  }
+  return best
+}
+
+/** The crab's index in DESIGNS, as a row stores it. */
+export const designIndex = (words: SpawnWords) => DESIGNS.indexOf(designFor(words))
+
+type Eyes = 'open' | 'happy' | 'x' | 'flat'
 
 const eyes = (ox: number, oy: number, kind: Eyes, ink = EYE) => {
   const xs = [ox + 2, ox + 12]
@@ -70,10 +135,6 @@ const eyes = (ox: number, oy: number, kind: Eyes, ink = EYE) => {
         .join('')
     case 'flat':
       return xs.map(x => r(x - 1, y + 1, 4, 1, ink)).join('')
-    case 'left-only':
-      return `<g class="blink">${r(xs[0]!, y, 2, 2, EYE)}</g>`
-    case 'ninja':
-      return `<g class="blink">${xs.map(x => r(x, y + 1, 2, 1, '#FFF')).join('')}</g>`
     default:
       return `<g class="blink">${xs.map(x => r(x, y, 2, 2, EYE)).join('')}</g>`
   }
@@ -90,10 +151,10 @@ const legs = (ox: number, oy: number, body: string) =>
  * The crab, its body's top-left at (ox, oy); `gear` is drawn over the body, under the eyes.
  * Hopping, the whole of it sits in one `.hop` group, so it lifts and lands as one piece.
  */
-const crab = (ox: number, oy: number, body: string, eyeKind: Eyes, isHopping: boolean, gear = '', ink = EYE) => {
+const crab = (ox: number, oy: number, body: string, eyeKind: Eyes, isHopping: boolean, gear = '') => {
   const whole =
     r(ox, oy, 16, 12, body) + r(ox - 4, oy + 4, 4, 4, body) + r(ox + 16, oy + 4, 4, 4, body) + gear +
-    eyes(ox, oy, eyeKind, ink) + legs(ox, oy, body)
+    eyes(ox, oy, eyeKind) + legs(ox, oy, body)
   return isHopping ? `<g class="hop">${whole}</g>` : whole
 }
 
@@ -109,27 +170,46 @@ const COSTUMES: Record<(typeof DESIGNS)[number], { eyes: Eyes; gear: string; sid
       `<g class="raise">${r(30, 11, 2, 2, BROWN)}${r(32, 9, 2, 2, BROWN)}${r(33, 6, 3, 3, '#F5C542')}` +
       `${r(34, 3, 1, 1, '#FFF3B0', 'tw')}${r(31, 5, 1, 1, '#FFF3B0', 'tw d2')}${r(35, 10, 1, 1, '#FFF3B0', 'tw d3')}</g>`,
   },
-  Pirate: {
-    eyes: 'left-only',
-    gear:
-      r(10, 5, 16, 4, '#C8372D') + r(12, 6, 2, 2, '#FFF') + r(18, 7, 2, 1, '#FFF') + r(22, 5, 2, 2, '#FFF') +
-      `<g class="flap">${r(6, 7, 4, 2, '#C8372D')}${r(4, 9, 4, 2, '#C8372D')}</g>` +
-      r(21, 8, 4, 4, '#111') +
-      r(30, 12, 2, 2, '#9AA3AD') + r(32, 10, 2, 2, '#9AA3AD') + r(32, 8, 2, 2, '#9AA3AD') + r(30, 7, 2, 2, '#9AA3AD'),
-  },
-  Ninja: {
-    eyes: 'ninja',
-    gear:
-      r(10, 8, 16, 5, '#2B2B33') +
-      `<g class="flap">${r(26, 8, 3, 2, '#2B2B33')}${r(29, 7, 4, 2, '#2B2B33')}${r(29, 10, 3, 2, '#2B2B33')}</g>`,
-    side: `<g class="spin">${r(3, 2, 2, 6, '#8A8F99')}${r(1, 4, 6, 2, '#8A8F99')}${r(3, 4, 2, 2, '#333')}</g>`,
-  },
-  Knight: {
+  // Goggles pushed up on the forehead, sparks of three colours twinkling around it.
+  'VFX Artist': {
     eyes: 'open',
     gear:
-      r(10, 3, 16, 5, '#A7AFBA') + r(10, 7, 16, 1, '#7D8590') +
-      `<g class="flap">${r(16, 0, 4, 3, '#D33A3A')}${r(20, 0, 3, 2, '#D33A3A')}</g>` +
-      `<g class="raise">${r(31, 2, 2, 9, '#D6DCE4')}${r(29, 11, 6, 1, '#8B6B2E')}${r(31, 12, 2, 3, '#5A3E1B')}</g>`,
+      r(10, 5, 16, 1, '#3A3A44') + r(11, 3, 5, 3, '#3A3A44') + r(20, 3, 5, 3, '#3A3A44') +
+      r(12, 4, 3, 1, '#FF9F43') + r(21, 4, 3, 1, '#FF9F43'),
+    side:
+      `<g class="tw">${r(32, 4, 1, 5, '#FFD166')}${r(30, 6, 5, 1, '#FFD166')}</g>` +
+      `<g class="tw d2">${r(29, 1, 1, 3, '#FF6FB5')}${r(28, 2, 3, 1, '#FF6FB5')}</g>` +
+      `<g class="tw d3">${r(34, 11, 1, 3, '#5FD3F3')}${r(33, 12, 3, 1, '#5FD3F3')}</g>` +
+      `<g class="tw d2">${r(2, 5, 1, 3, '#5FD3F3')}${r(1, 6, 3, 1, '#5FD3F3')}</g>`,
+  },
+  // A cap, and a wireframe cube held up in the right claw, its near corner lit.
+  '3D Modeler': {
+    eyes: 'open',
+    gear:
+      r(11, 4, 14, 3, '#3A7BD5') + r(13, 3, 10, 1, '#3A7BD5') + r(25, 6, 3, 1, '#2A5BA5') +
+      `<g class="raise">` +
+      r(29, 6, 5, 1, '#7FD1F3') + r(29, 10, 5, 1, '#7FD1F3') + r(29, 6, 1, 5, '#7FD1F3') + r(33, 6, 1, 5, '#7FD1F3') +
+      r(31, 4, 5, 1, '#7FD1F3') + r(35, 4, 1, 5, '#7FD1F3') + r(30, 5, 1, 1, '#7FD1F3') + r(34, 5, 1, 1, '#7FD1F3') +
+      r(34, 9, 1, 1, '#7FD1F3') + r(29, 6, 1, 1, '#FFFFFF') +
+      `</g>`,
+  },
+  // A little laptop on the right claw, lines of code on its screen.
+  Programmer: {
+    eyes: 'open',
+    gear:
+      r(29, 3, 7, 7, '#3A3A44') + r(30, 4, 5, 5, '#1E2A22') +
+      r(31, 5, 3, 1, '#7FD1AE') + r(31, 7, 2, 1, '#7FD1AE') + r(33, 7, 1, 1, '#7FD1AE', 'tw') +
+      r(28, 10, 8, 1, '#8A93A0'),
+  },
+  // An explorer's hat, and a magnifying glass held out in the right claw.
+  Explorer: {
+    eyes: 'open',
+    gear:
+      r(8, 6, 20, 1, '#B98B52') + r(11, 3, 14, 3, '#C9A06B') + r(11, 5, 14, 1, '#7A4E2D') +
+      `<g class="dab">` +
+      r(31, 5, 4, 1, '#5A3E1B') + r(31, 10, 4, 1, '#5A3E1B') + r(30, 6, 1, 4, '#5A3E1B') + r(35, 6, 1, 4, '#5A3E1B') +
+      r(31, 6, 4, 4, '#BFE3FF') + r(32, 7, 1, 1, '#FFFFFF') + r(29, 11, 2, 2, BROWN) +
+      `</g>`,
   },
   Musician: {
     eyes: 'open',
@@ -159,11 +239,9 @@ const moodBody = (mood: CrabMood) => (mood === 'failed' || mood === 'stopped' ? 
  * The row above 0 is headroom, so a hat or sword at the top edge stays whole mid-hop.
  */
 export const agentSprite = (design: number, mood: CrabMood): string => {
-  const c = COSTUMES[DESIGNS[design % DESIGNS.length] ?? 'Wizard']
-  // Eyes over a dark mask are drawn light, so the Ninja's moods still read.
-  const ink = c.eyes === 'ninja' ? '#FFFFFF' : EYE
+  const c = COSTUMES[DESIGNS[design % DESIGNS.length] ?? FALLBACK]
   const isHopping = mood === 'working'
-  const inner = (c.side ?? '') + crab(10, 7, moodBody(mood), moodEyes(mood, c.eyes), isHopping, c.gear, ink)
+  const inner = (c.side ?? '') + crab(10, 7, moodBody(mood), moodEyes(mood, c.eyes), isHopping, c.gear)
 
   return svg(36, 25, BASE_CSS, `<g class="${isHopping ? 'walk' : 'still'}">${inner}</g>`, -1)
 }

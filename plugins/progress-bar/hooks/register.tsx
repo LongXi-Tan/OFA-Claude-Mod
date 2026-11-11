@@ -14,7 +14,7 @@ import { DEMO_MS, DEMO_TITLE, clearDemo, runDemo } from './demo'
 import { costOf, fmtCost, fmtTime, fmtTokens, modelName, tokensOf, windowOf } from './model'
 import { afterTaskCreate, afterTaskUpdate, afterTodoWrite, afterUpdatePlan, afterWrapUp, countsOf } from './plan'
 import type { Args } from './plan'
-import { BAND_H, DESIGNS, agentSprite, bandBar, bandCrab, bandDot, bandLayout, bandTitle, barSprite, mainSprite } from './sprites'
+import { BAND_H, DESIGNS, agentSprite, designIndex, bandBar, bandCrab, bandDot, bandLayout, bandTitle, barSprite, mainSprite } from './sprites'
 import type { CrabMood } from './sprites'
 import {
   EMPTY_MAIN,
@@ -179,7 +179,7 @@ async function addAgent($: EngineInterface, e: AgentSpawnInput, model: string, a
     description: e.description || e.subagentType,
     subagentType: e.subagentType,
     model: model || e.model || e.parentModel,
-    design: ((list.at(-1)?.design ?? -1) + 1) % DESIGNS.length,
+    design: designIndex({ description: e.description, name: e.name, subagentType: e.subagentType, prompt: e.prompt }),
     status: early ?? 'running',
     endedAt: early === undefined ? undefined : at,
     isBackground: e.background,
@@ -354,7 +354,7 @@ export const register: Register = (on, options) => {
     if (arg === 'demo') {
       await runDemo($)
       return {
-        text: `Playing the progress-bar demo: six crabs, about ${Math.round(DEMO_MS / 1000)} seconds, no model calls.`,
+        text: `Playing the progress-bar demo: seven crabs, about ${Math.round(DEMO_MS / 1000)} seconds, no model calls.`,
       }
     }
     if (arg === 'clear') {

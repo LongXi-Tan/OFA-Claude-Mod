@@ -16,7 +16,7 @@ export const EMPTY_PLAN: PlanState = { tasks: [] }
 
 // Change a tag when that value's fields change: it declines what an earlier
 // version stored, which outlives a reload. Fields added as optional keep the tag.
-const agents = atom({ plugin: 'progress-bar', key: 'agents' } as const, [] as AgentRow[], { shape: 'agents-1' })
+const agents = atom({ plugin: 'progress-bar', key: 'agents' } as const, [] as AgentRow[], { shape: 'agents-2' })
 const main = atom({ plugin: 'progress-bar', key: 'main' } as const, EMPTY_MAIN, { shape: 'main-1' })
 const plan = atom({ plugin: 'progress-bar', key: 'plan' } as const, EMPTY_PLAN, { shape: 'plan-1' })
 const now = atom({ plugin: 'progress-bar', key: 'now' } as const, 0)

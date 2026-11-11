@@ -1,14 +1,15 @@
 // The free demo: one fake subagent per design, spawned 1.5s apart, each running for a
-// while with its numbers climbing; the Ninja fails so the grey crab shows too. No model
+// while with its numbers climbing; the 3D Modeler fails so the grey crab shows too. No model
 // is called. A real run that starts meanwhile takes over: the demo's timers stand down.
 
 import type { EngineInterface } from 'claude-code'
 
 import type { AgentRow } from '../types'
 import { costOf } from './model'
+import { designIndex } from './sprites'
 import { KEEP, openPane, readMain, setNow, updateAgents, updateMain } from './state'
 
-export const DEMO_TITLE = 'Demo: six crabs at work'
+export const DEMO_TITLE = 'Demo: seven crabs at work'
 
 // The demo's timers fire on their own; a refused write ends one quietly.
 const quietly = (work: Promise<unknown>) => void work.catch(() => undefined)
@@ -39,13 +40,15 @@ export async function clearDemo($: EngineInterface) {
   await updateAgents($, list => list.filter(a => !a.isDemo))
 }
 
+// One task per crab, each worded so the spawn's own words pick it, as a real one's do.
 const DEMO: { description: string; type: string; model: string; effort: string; ms: number; fails?: true }[] = [
   { description: 'Scout the repo layout', type: 'Explore', model: 'claude-haiku-5-5', effort: 'low', ms: 9000 },
-  { description: 'Plunder the test logs', type: 'general-purpose', model: 'claude-sonnet-5-5', effort: 'medium', ms: 11000 },
-  { description: 'Sneak through the API types', type: 'Explore', model: 'claude-opus-5-5', effort: 'high', ms: 8000, fails: true },
-  { description: 'Guard the build config', type: 'general-purpose', model: 'claude-opus-5-5', effort: 'max', ms: 13000 },
-  { description: 'Tune the sprite timings', type: 'general-purpose', model: 'claude-sonnet-5-5', effort: 'high', ms: 10000 },
-  { description: 'Paint the band colours', type: 'general-purpose', model: 'claude-opus-5-5', effort: 'xhigh', ms: 12000 },
+  { description: 'Programmer: fix the score bug', type: 'general-purpose', model: 'claude-sonnet-5-5', effort: 'medium', ms: 11000 },
+  { description: 'Model the barrel in Blender', type: 'general-purpose', model: 'claude-opus-5-5', effort: 'high', ms: 8000, fails: true },
+  { description: 'VFX Artist: explosion particles', type: 'general-purpose', model: 'claude-opus-5-5', effort: 'max', ms: 13000 },
+  { description: 'Compose the menu music', type: 'general-purpose', model: 'claude-sonnet-5-5', effort: 'high', ms: 10000 },
+  { description: 'Paint the crate textures', type: 'general-purpose', model: 'claude-opus-5-5', effort: 'xhigh', ms: 12000 },
+  { description: 'Plan the next release', type: 'Plan', model: 'claude-opus-5-5', effort: 'high', ms: 9500 },
 ]
 
 /** How long the demo plays, start to Done, in milliseconds. */
@@ -86,7 +89,7 @@ export async function runDemo($: EngineInterface) {
             subagentType: d.type,
             model: d.model,
             effort: d.effort,
-            design: i,
+            design: designIndex({ description: d.description, subagentType: d.type }),
             status: 'running',
             isBackground: i % 2 === 1,
             isDemo: true,

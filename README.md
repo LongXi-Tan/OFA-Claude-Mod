@@ -46,6 +46,10 @@ claude plugin marketplace update ofa-claude-mod
 claude plugin update game-studio@ofa-claude-mod
 ```
 
+```
+claude plugin update progress-bar@ofa-claude-mod
+```
+
 ## Develop
 
 ```bash

@@ -1,8 +1,42 @@
 import { expect, test } from 'claude-code/testing'
 
 import { SCENE_POSES, SCENE_SEQUENCE, SCENE_TYPING } from './scene'
-import { DESIGNS, SCENE_S, agentSprite, bandBar, bandCrab, bandDot, bandLayout, bandTitle, mainSprite } from './sprites'
+import { DESIGNS, FALLBACK, SCENE_S, agentSprite, bandBar, bandCrab, bandDot, bandLayout, bandTitle, designFor, mainSprite } from './sprites'
 import type { CrabMood } from './sprites'
+
+test('a spawn gets the crab its own words name', async () => {
+  const cases: [Parameters<typeof designFor>[0], string][] = [
+    // A studio's workers, by their descriptions and the first line of their briefs.
+    [{ description: 'VFX Artist: explosion look', prompt: 'You are the VFX Artist worker of the game studio, lane `vfx`.' }, 'VFX Artist'],
+    [{ description: '3D Model Artist: explosive barrel', prompt: 'You are the 3D Model Artist worker of the game studio.' }, '3D Modeler'],
+    [{ description: 'Game Programmer: barrel component', prompt: 'You are the Game Programmer worker of the game studio.' }, 'Programmer'],
+    // Plain requests that name no role.
+    [{ description: 'Fix the login bug' }, 'Programmer'],
+    [{ description: 'Add tests for the parser' }, 'Programmer'],
+    [{ description: 'Sculpt a low-poly rock in Blender' }, '3D Modeler'],
+    [{ description: 'Tune the fire particles' }, 'VFX Artist'],
+    [{ description: 'Paint the crate textures' }, 'Painter'],
+    [{ description: 'Mix the footstep sounds' }, 'Musician'],
+    [{ description: 'Find where config is loaded' }, 'Explorer'],
+    [{ description: 'Repo layout', subagentType: 'Explore' }, 'Explorer'],
+    [{ description: 'Plan the next release', subagentType: 'Plan' }, FALLBACK],
+    [{ description: '' }, FALLBACK],
+  ]
+  for (const [words, want] of cases) expect(designFor(words), JSON.stringify(words)).toBe(want)
+})
+
+test('a role word inside a longer word picks no crab', async () => {
+  // "start" holds "art", "artistic" isn't "artist", "fixture" isn't "fix".
+  expect(designFor({ description: 'Start the artistic fixture' })).toBe(FALLBACK)
+})
+
+test('the description outweighs the rest of the brief', async () => {
+  expect(designFor({ description: 'Write the shader', prompt: 'Read the code and fix what breaks.' })).toBe('VFX Artist')
+})
+
+test('every crab is drawn, and the matcher hands out every one', async () => {
+  for (const name of DESIGNS) expect(agentSprite(DESIGNS.indexOf(name), 'working'), name).toContain('<svg')
+})
 
 // The sprites are SVG strings, so these tests read the drawing itself: every rect, the
 // groups around it and their classes, and the CSS and SVG timing that move them.
