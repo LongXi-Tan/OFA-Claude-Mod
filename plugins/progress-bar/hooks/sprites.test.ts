@@ -38,6 +38,36 @@ test('every crab is drawn, and the matcher hands out every one', async () => {
   for (const name of DESIGNS) expect(agentSprite(DESIGNS.indexOf(name), 'working'), name).toContain('<svg')
 })
 
+test('no crab ever has X eyes, whatever became of its work', async () => {
+  // Open eyes are 2 rows tall, happy ones 2, flat ones 1; an X spans 4. Each eye is the
+  // eye-ink on its own half of the body.
+  const tallest = (pixels: [number, number][]) => {
+    const [left, right] = [pixels.filter(([x]) => x < 18), pixels.filter(([x]) => x >= 18)]
+    return Math.max(...[left, right].map(px => new Set(px.map(([, y]) => y)).size))
+  }
+  const eyeInk = (svg: string): [number, number][] =>
+    rects(svg)
+      .filter(r => r.fill === '#1A1A1A')
+      .flatMap(r => Array.from({ length: r.w * r.h }, (_, i): [number, number] => [r.x + (i % r.w), r.y + Math.floor(i / r.w)]))
+  const moods: CrabMood[] = ['working', ...RESTING]
+  for (const name of DESIGNS)
+    for (const mood of moods) expect(tallest(eyeInk(agentSprite(DESIGNS.indexOf(name), mood))), `${name} ${mood}`).toBeLessThanOrEqual(2)
+  for (const isDone of [false, true]) {
+    const crab = ownCrab(bandCrab(isDone)).filter(r => r.fill === '#1A1A1A')
+    const ys = new Set(crab.flatMap(r => Array.from({ length: r.h }, (_, i) => r.y + i)))
+    expect(ys.size, `band crab, done: ${isDone}`).toBeLessThanOrEqual(2)
+  }
+  // The recorded scene the main crab plays (it draws a dark pixel or two on the laptop too):
+  // no eye-ink pixel has all four diagonal neighbours lit and its straight ones dark, an X.
+  SCENE_POSES.forEach((rows, p) => {
+    const E = (x: number, y: number) => rows[y]?.[x] === 'E'
+    const xs = rows.flatMap((row, y) =>
+      [...row].map((_, x) => x).filter(x => E(x - 1, y - 1) && E(x + 1, y - 1) && E(x - 1, y + 1) && E(x + 1, y + 1) && !E(x, y - 1) && !E(x - 1, y)),
+    )
+    expect(xs, `scene pose ${p}`).toHaveLength(0)
+  })
+})
+
 // The sprites are SVG strings, so these tests read the drawing itself: every rect, the
 // groups around it and their classes, and the CSS and SVG timing that move them.
 

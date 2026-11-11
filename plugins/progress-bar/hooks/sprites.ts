@@ -46,7 +46,7 @@ const BASE_CSS = `
 .still,.still *{animation:none!important}
 `
 
-/** `stopped`: interrupted; `failed`: ended on an error. Both grey. */
+/** `stopped`: interrupted; `failed`: ended on an error. Both grey, eyes shut flat. */
 export type CrabMood = 'working' | 'done' | 'failed' | 'stopped'
 
 // ---- Which crab a subagent gets ---------------------------------------------------
@@ -117,7 +117,7 @@ export function designFor(words: SpawnWords): Design {
 /** The crab's index in DESIGNS, as a row stores it. */
 export const designIndex = (words: SpawnWords) => DESIGNS.indexOf(designFor(words))
 
-type Eyes = 'open' | 'happy' | 'x' | 'flat'
+type Eyes = 'open' | 'happy' | 'flat'
 
 const eyes = (ox: number, oy: number, kind: Eyes, ink = EYE) => {
   const xs = [ox + 2, ox + 12]
@@ -125,14 +125,6 @@ const eyes = (ox: number, oy: number, kind: Eyes, ink = EYE) => {
   switch (kind) {
     case 'happy':
       return xs.map(x => r(x - 1, y + 1, 1, 1, ink) + r(x, y, 2, 1, ink) + r(x + 2, y + 1, 1, 1, ink)).join('')
-    case 'x':
-      return xs
-        .map(
-          x =>
-            r(x - 1, y - 1, 1, 1, ink) + r(x + 2, y - 1, 1, 1, ink) + r(x, y, 2, 2, ink) +
-            r(x - 1, y + 2, 1, 1, ink) + r(x + 2, y + 2, 1, 1, ink),
-        )
-        .join('')
     case 'flat':
       return xs.map(x => r(x - 1, y + 1, 4, 1, ink)).join('')
     default:
@@ -230,7 +222,7 @@ const COSTUMES: Record<(typeof DESIGNS)[number], { eyes: Eyes; gear: string; sid
 }
 
 const moodEyes = (mood: CrabMood, working: Eyes): Eyes =>
-  mood === 'done' ? 'happy' : mood === 'failed' ? 'x' : mood === 'stopped' ? 'flat' : working
+  mood === 'done' ? 'happy' : mood === 'failed' || mood === 'stopped' ? 'flat' : working
 
 const moodBody = (mood: CrabMood) => (mood === 'failed' || mood === 'stopped' ? GREY : BODY)
 
